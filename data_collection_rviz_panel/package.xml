@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>data_collection_rviz_panel</name>
+  <version>0.1.0</version>
+  <description>Native Qt and RViz2 console for UR5e data collection.</description>
+  <maintainer email="hjy@todo.todo">hjy</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>rviz_common</depend>
+  <depend>rviz_rendering</depend>
+  <depend>rviz_default_plugins</depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>data_collection_pkg</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>my_description</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

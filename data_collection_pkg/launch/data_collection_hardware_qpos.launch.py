@@ -1,0 +1,57 @@
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument("root", default_value="datasets"),
+        DeclareLaunchArgument("task", default_value="hardware_qpos"),
+        DeclareLaunchArgument("dataset_stage", default_value="original"),
+        DeclareLaunchArgument("runtime_mode", default_value="teleop"),
+        DeclareLaunchArgument("sample_rate_hz", default_value="15.0"),
+        DeclareLaunchArgument("gripper_state_topic", default_value="/gripper/state"),
+        DeclareLaunchArgument("external_camera_topic", default_value="/camera2/scene_camera/color/image_raw/compressed"),
+        DeclareLaunchArgument("wrist_camera_topic", default_value="/camera1/wrist_camera/color/image_raw/compressed"),
+        DeclareLaunchArgument("external_camera_msg_type", default_value="sensor_msgs.msg:CompressedImage"),
+        DeclareLaunchArgument("wrist_camera_msg_type", default_value="sensor_msgs.msg:CompressedImage"),
+        DeclareLaunchArgument("safety_state_topic", default_value="/safety/state"),
+        DeclareLaunchArgument("end_effector_pose_topic", default_value="/tool0/pose"),
+        DeclareLaunchArgument("required_cameras", default_value="external,wrist"),
+        DeclareLaunchArgument("max_sync_delta_s", default_value="0.07"),
+        DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.03"),
+        DeclareLaunchArgument("image_storage_format", default_value="jpeg"),
+        DeclareLaunchArgument("jpeg_quality", default_value="75"),
+        DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Float64MultiArray"),
+        Node(
+            package="data_collection_pkg",
+            executable="data_collection_collector_node",
+            name="data_collection_hardware_qpos_collector",
+            output="screen",
+            parameters=[{
+                "root": LaunchConfiguration("root"),
+                "task": LaunchConfiguration("task"),
+                "source": LaunchConfiguration("runtime_mode"),
+                "runtime_mode": LaunchConfiguration("runtime_mode"),
+                "dataset_stage": LaunchConfiguration("dataset_stage"),
+                "sampling_mode": "fixed_rate",
+                "sample_rate_hz": LaunchConfiguration("sample_rate_hz"),
+                "dataset_schema": "qpos_gripper",
+                "gripper_state_topic": LaunchConfiguration("gripper_state_topic"),
+                "external_camera_topic": LaunchConfiguration("external_camera_topic"),
+                "wrist_camera_topic": LaunchConfiguration("wrist_camera_topic"),
+                "external_camera_msg_type": LaunchConfiguration("external_camera_msg_type"),
+                "wrist_camera_msg_type": LaunchConfiguration("wrist_camera_msg_type"),
+                "safety_state_topic": LaunchConfiguration("safety_state_topic"),
+                "end_effector_pose_topic": LaunchConfiguration("end_effector_pose_topic"),
+                "required_cameras": LaunchConfiguration("required_cameras"),
+                "max_sync_delta_s": LaunchConfiguration("max_sync_delta_s"),
+                "state_max_sync_delta_s": LaunchConfiguration("state_max_sync_delta_s"),
+                "image_storage_format": LaunchConfiguration("image_storage_format"),
+                "jpeg_quality": LaunchConfiguration("jpeg_quality"),
+                "gripper_state_msg_type": LaunchConfiguration("gripper_state_msg_type"),
+                "servo_l_command_msg_type": "std_msgs.msg:String",
+            }],
+        ),
+    ])
