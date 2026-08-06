@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Realtime Data Dashboard Mockup</title>
+  <style>
+    :root {
+      --bg: #eef1f5;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --line: #d7dee8;
+      --text: #17212b;
+      --muted: #657386;
+      --blue: #2563eb;
+      --green: #1d8b5b;
+      --amber: #b7791f;
+      --red: #c2413a;
+      --purple: #7c3aed;
+      --teal: #0f8b8d;
+      --orange: #d97706;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      background: #111827;
+      color: #f8fafc;
+    }
+    header h1 { margin: 0; font-size: 17px; font-weight: 650; }
+    .header-right { display: flex; align-items: center; gap: 16px; color: #cbd5e1; }
+    .live { display: inline-flex; align-items: center; gap: 7px; }
+    .live i { width: 9px; height: 9px; border-radius: 50%; background: #41d18b; display: inline-block; }
+    main { padding: 14px; display: grid; gap: 14px; }
+    .realtime {
+      display: grid;
+      grid-template-columns: minmax(370px, 0.9fr) minmax(520px, 1.3fr);
+      gap: 14px;
+      min-width: 0;
+    }
+    .stack { display: grid; gap: 14px; min-width: 0; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; overflow: hidden; }
+    .panel-title {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 650;
+    }
+    .panel-title small { color: var(--muted); font-weight: 450; }
+    .stage {
+      height: 345px;
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(203, 213, 225, .45) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(203, 213, 225, .45) 1px, transparent 1px),
+        #f8fafc;
+      background-size: 28px 28px;
+    }
+    .stage svg { width: 100%; height: 100%; display: block; }
+    .stage-label { position: absolute; left: 12px; top: 11px; color: var(--muted); font-size: 12px; }
+    .stage-meta { position: absolute; right: 12px; top: 11px; color: var(--muted); font-size: 12px; text-align: right; }
+    .camera-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
+    .camera { min-width: 0; aspect-ratio: 16 / 10; background: #17212b; border: 1px solid #314153; position: relative; overflow: hidden; }
+    .camera svg { width: 100%; height: 100%; opacity: .72; }
+    .camera .caption { position: absolute; left: 8px; bottom: 6px; color: #f8fafc; font-size: 11px; }
+    .camera .age { position: absolute; right: 8px; top: 6px; color: #86efac; font-size: 11px; }
+    .chart-stack { display: grid; gap: 10px; padding: 10px; }
+    .chart { border: 1px solid var(--line); background: var(--panel-soft); min-width: 0; }
+    .chart-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 0; }
+    .chart-head strong { font-size: 13px; }
+    .chart-head span { color: var(--muted); font-size: 11px; }
+    canvas { width: 100%; height: 132px; display: block; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 10px 8px; color: var(--muted); font-size: 10px; }
+    .legend b { display: inline-block; width: 8px; height: 8px; margin-right: 3px; border-radius: 2px; }
+    .legacy { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr 1fr; gap: 10px; }
+    .legacy .panel-title { min-height: 38px; font-size: 12px; }
+    .legacy-body { padding: 10px; min-height: 135px; }
+    .control-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .control-row button, .control-row input, .control-row select { height: 30px; border: 1px solid var(--line); border-radius: 5px; background: #fff; padding: 0 8px; font: inherit; }
+    .control-row button.primary { color: #fff; background: var(--blue); border-color: var(--blue); }
+    .control-row button.danger { color: var(--red); background: #fff7f6; border-color: #efaaa5; }
+    .control-row input { grid-column: 1 / -1; }
+    .item { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid #e8edf3; }
+    .item:last-child { border-bottom: 0; }
+    .name { min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+    .badge { flex: 0 0 auto; padding: 2px 6px; border-radius: 999px; font-size: 10px; border: 1px solid var(--line); color: var(--muted); }
+    .badge.ok { color: var(--green); background: #eefbf5; border-color: #98d4b8; }
+    .badge.warn { color: var(--amber); background: #fff8dc; border-color: #e5c36b; }
+    .badge.bad { color: var(--red); background: #fff2f1; border-color: #efaaa5; }
+    .muted { color: var(--muted); font-size: 11px; }
+    @media (max-width: 1180px) {
+      .realtime { grid-template-columns: 1fr; }
+      .legacy { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 650px) {
+      header { height: auto; padding: 12px; gap: 10px; align-items: flex-start; flex-direction: column; }
+      main { padding: 8px; }
+      .camera-grid, .legacy { grid-template-columns: 1fr; }
+      .stage { height: 280px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Data Flow Dashboard</h1>
+    <div class="header-right"><span class="live"><i></i> ROS connected</span><span>2.0 Hz monitor</span><span>08:42:17</span></div>
+  </header>
+
+  <main>
+    <div class="realtime">
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-title"><span>Robot State</span><small>URDF + /joint_states</small></div>
+          <div class="stage">
+            <div class="stage-label">UR5e simulation / forward kinematics view</div>
+            <div class="stage-meta">qpos 6 DOF<br>TCP pose active<br>model: my_robot_real.urdf.xacro</div>
+            <svg viewBox="0 0 520 345" aria-label="Static robot arm mockup">
+              <ellipse cx="258" cy="300" rx="120" ry="21" fill="#cbd5e1" opacity=".55"/>
+              <path d="M130 286 L385 286" stroke="#94a3b8" stroke-width="2"/>
+              <path d="M258 290 L258 72" stroke="#94a3b8" stroke-width="1" stroke-dasharray="5 6"/>
+              <g stroke="#17212b" stroke-width="16" stroke-linecap="round" fill="none">
+                <path d="M258 271 L258 209"/>
+                <path d="M258 209 L183 149"/>
+                <path d="M183 149 L270 102"/>
+                <path d="M270 102 L331 137"/>
+                <path d="M331 137 L373 103"/>
+                <path d="M373 103 L409 119"/>
+              </g>
+              <g fill="#64748b" stroke="#f8fafc" stroke-width="3">
+                <circle cx="258" cy="271" r="18"/><circle cx="258" cy="209" r="15"/>
+                <circle cx="183" cy="149" r="15"/><circle cx="270" cy="102" r="15"/>
+                <circle cx="331" cy="137" r="14"/><circle cx="373" cy="103" r="13"/>
+              </g>
+              <g fill="#2563eb"><circle cx="258" cy="271" r="6"/><circle cx="258" cy="209" r="5"/><circle cx="183" cy="149" r="5"/><circle cx="270" cy="102" r="5"/><circle cx="331" cy="137" r="5"/><circle cx="373" cy="103" r="5"/></g>
+              <path d="M407 111 l22 -11 m-22 11 l22 11" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/>
+              <text x="275" y="322" fill="#657386" font-size="11">base_link</text>
+              <text x="390" y="92" fill="#657386" font-size="11">tool0</text>
+            </svg>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-title"><span>Camera Views</span><small>compressed JPEG streams</small></div>
+          <div class="camera-grid">
+            <div class="camera">
+              <svg viewBox="0 0 320 190"><rect width="320" height="190" fill="#26384a"/><path d="M0 148 L95 90 L170 137 L236 70 L320 135 V190 H0Z" fill="#405c70"/><circle cx="245" cy="47" r="22" fill="#d6b45f" opacity=".8"/><path d="M125 160 l35 -76 l35 76" fill="#1b2733"/></svg>
+              <span class="caption">Scene / ego camera</span><span class="age">12 ms</span>
+            </div>
+            <div class="camera">
+              <svg viewBox="0 0 320 190"><rect width="320" height="190" fill="#3d4b40"/><path d="M0 150 C80 120 140 164 210 126 C255 101 285 116 320 92 V190 H0Z" fill="#647d63"/><rect x="120" y="45" width="80" height="68" fill="#a8b8a1"/><circle cx="160" cy="79" r="18" fill="#4c5d4e"/></svg>
+              <span class="caption">Wrist camera</span><span class="age">18 ms</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-title"><span>Realtime Telemetry</span><small>last 10 seconds</small></div>
+        <div class="chart-stack">
+          <div class="chart"><div class="chart-head"><strong>Joint Position (qpos)</strong><span>rad</span></div><canvas id="qpos" width="800" height="180"></canvas><div class="legend" id="qposLegend"></div></div>
+          <div class="chart"><div class="chart-head"><strong>Joint Velocity (qvel)</strong><span>rad/s</span></div><canvas id="qvel" width="800" height="180"></canvas><div class="legend" id="qvelLegend"></div></div>
+          <div class="chart"><div class="chart-head"><strong>Effort / Torque</strong><span>Nm</span></div><canvas id="effort" width="800" height="180"></canvas><div class="legend" id="effortLegend"></div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="legacy">
+      <section class="panel"><div class="panel-title"><span>Capture</span><span class="badge ok">running</span></div><div class="legacy-body"><div class="control-row"><select aria-label="Capture mode"><option>teleop</option><option>policy</option><option>http</option></select><input value="teleop_segment_01" aria-label="Task name"><button>New Task</button><button class="primary">Start Capture</button><button class="danger">Stop Capture</button></div><div class="item"><span>Dataset path</span><span class="name">~/ur5e_ws/datasets/ui_capture/teleop_segment_01_20260804_084217/original/teleop/qpos_gripper</span></div><div class="item"><span>Next episode file</span><span class="name">data/episode_000000.jsonl</span></div></div></section>
+      <section class="panel"><div class="panel-title"><span>Key Topics</span><span class="badge ok">5 active</span></div><div class="legacy-body"><div class="item"><span class="name">/joint_states</span><span class="badge ok">active</span></div><div class="item"><span class="name">/robotiq_2f_gripper/joint_states</span><span class="badge ok">active</span></div><div class="item"><span class="name">/camera2/scene_camera/color/image_raw/compressed</span><span class="badge ok">active</span></div><div class="item"><span class="name">/camera1/wrist_camera/color/image_raw/compressed</span><span class="badge ok">active</span></div><div class="item"><span class="name">/tcp_pose_broadcaster/pose</span><span class="badge warn">stale</span></div><div class="item"><span class="name">/safety/state</span><span class="badge ok">active</span></div></div></section>
+      <section class="panel"><div class="panel-title"><span>Advanced Topology</span><span class="badge">12 edges</span></div><div class="legacy-body"><div class="item"><span class="name">/ur_driver -> /collector</span></div><div class="muted">/joint_states</div><div class="item"><span class="name">/camera2 -> /collector</span></div><div class="muted">/image_raw/compressed</div></div></section>
+      <section class="panel"><div class="panel-title"><span>Quality</span><span class="badge ok">valid</span></div><div class="legacy-body"><div class="item"><span>Frames</span><strong>1,284</strong></div><div class="item"><span>Sync delta</span><strong>18 ms</strong></div><div class="item"><span>Drops</span><strong>0</strong></div><div class="item"><span>Drop reason</span><span class="muted">none</span></div></div></section>
+      <section class="panel"><div class="panel-title"><span>Replay Control</span><span class="badge ok">ready</span></div><div class="legacy-body"><div class="control-row"><input value="/datasets/trainable/teleop/qpos_gripper"><select><option>Episode 0000</option><option>Episode 0001</option><option>Episode 0002</option></select><input value="10" aria-label="Replay rate"><button class="primary">Play</button><button>Pause</button><button class="danger">Stop</button></div><div class="item"><span>Progress</span><span>428 / 1,284 frames</span></div><div class="item"><span>Model / curves</span><span class="badge ok">replaying</span></div></div></section>
+    </div>
+  </main>
+
+  <script>
+    const colors = ["#2563eb", "#c2413a", "#1d8b5b", "#7c3aed", "#d97706", "#0f8b8d"];
+    function drawChart(id, legendId, scale) {
+      const canvas = document.getElementById(id);
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
+      for (let y = 20; y < h; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+      for (let x = 0; x < w; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+      for (let j = 0; j < 6; j++) {
+        ctx.strokeStyle = colors[j]; ctx.lineWidth = 2; ctx.beginPath();
+        for (let i = 0; i < 160; i++) {
+          const x = i * w / 159;
+          const y = h / 2 + Math.sin(i / 10 + j * 0.8) * (16 + j * 3) * scale + Math.cos(i / 27 + j) * 5;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      document.getElementById(legendId).innerHTML = colors.map((color, i) => `<span><b style="background:${color}"></b>joint_${i + 1}</span>`).join("");
+    }
+    drawChart("qpos", "qposLegend", 1.1);
+    drawChart("qvel", "qvelLegend", 0.65);
+    drawChart("effort", "effortLegend", 0.35);
+  </script>
+</body>
+</html>
