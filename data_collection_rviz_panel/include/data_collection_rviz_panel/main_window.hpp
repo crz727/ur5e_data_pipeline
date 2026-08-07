@@ -61,6 +61,7 @@ private:
   void request_lerobot_export_status();
   void request_replay_seek(int frame_index);
   void update_capture_toggle();
+  void show_temporary_capture_status(const QString & status);
   void post_json(const QString & path, const QJsonObject & payload);
   void update_dashboard_state(const QJsonObject & state);
   void update_camera(QLabel * label, const sensor_msgs::msg::CompressedImage & image);
@@ -145,6 +146,9 @@ private:
   bool replay_timeline_dragging_{false};
   bool cleaning_in_progress_{false};
   bool lerobot_export_in_progress_{false};
+  bool language_editor_request_in_progress_{false};
+  bool capture_status_override_active_{false};
+  int capture_status_override_generation_{0};
 };
 
 }  // namespace data_collection_rviz_panel

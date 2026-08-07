@@ -57,6 +57,12 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert 'QStringLiteral("/api/capture/export-lerobot/preflight")' in main_window
     assert 'QStringLiteral("/api/capture/export-lerobot")' in main_window
     assert 'QStringLiteral("profile")' in main_window
+    assert 'path == QStringLiteral("/api/capture/start")' in main_window
+    assert 'QStringLiteral("Capture could not start: %1")' in main_window
+    assert "connect(dialog, &QFileDialog::rejected" in main_window
+    assert "show_temporary_capture_status" in main_window
+    assert "language_editor_request_in_progress_" in main_window
+    assert "if (capture_running_ || language_editor_request_in_progress_)" in main_window
     assert "QMessageBox" in main_window
     assert "#include <QDialog>" in main_window
     assert "auto * result_dialog = new QDialog(this);" in main_window
