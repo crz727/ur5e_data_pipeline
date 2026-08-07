@@ -3,6 +3,7 @@ import json
 import pytest
 
 from data_collection_pkg.dataset.jsonl_writer import JsonlDatasetWriter
+from data_collection_pkg.dataset.task_annotations import parse_capture_task_annotation
 
 
 def _observation(timestamp=1.0):
@@ -16,6 +17,79 @@ def _observation(timestamp=1.0):
         "images": {},
         "safety": {"software_estop": False, "protective_stop": False},
     }
+
+
+def test_writer_persists_defensive_copied_episode_task_annotation(tmp_path):
+    annotation = {
+        "task_name": "pick_place_batch_0807",
+        "task_id": "pick_red_block_to_blue_tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+        "annotation_source": "capture_ui",
+    }
+    writer = JsonlDatasetWriter(
+        tmp_path,
+        "qpos_gripper",
+        task="pick_place_batch_0807",
+        source="teleop",
+        episode_metadata=annotation,
+    )
+    annotation["task_id"] = "mutated_task_id"
+    writer.start_episode()
+    writer.add_frame(_observation(), [0.0] * 7)
+    writer.close_episode()
+
+    episode = json.loads((writer.meta_dir / "episodes.jsonl").read_text(encoding="utf-8"))
+    frame = json.loads((writer.data_dir / "episode_000000.jsonl").read_text(encoding="utf-8"))
+
+    assert episode["task"] == "pick_place_batch_0807"
+    assert episode["task_name"] == "pick_place_batch_0807"
+    assert episode["task_id"] == "pick_red_block_to_blue_tray"
+    assert episode["language_instruction_en"] == "Pick up the red block and place it in the blue tray."
+    assert episode["language_instruction_zh"] == "抓取红色方块并放入蓝色托盘。"
+    assert episode["annotation_source"] == "capture_ui"
+    assert episode["source"] == "teleop"
+    assert "language_instruction_en" not in frame["metadata"]
+    assert "language_instruction_zh" not in frame["metadata"]
+
+
+def test_capture_task_annotation_normalizes_and_validates_capture_inputs():
+    annotation = parse_capture_task_annotation(
+        task_name="pick_place_batch_0807",
+        task_id="PICK-RED-BLOCK-TO-BLUE-TRAY",
+        english=" Pick up the red block\n and place it in the blue tray. ",
+        chinese=" 抓取红色方块并放入蓝色托盘。 ",
+    )
+
+    assert annotation == {
+        "task_name": "pick_place_batch_0807",
+        "task_id": "pick-red-block-to-blue-tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+        "annotation_source": "capture_ui",
+    }
+
+
+def test_capture_task_annotation_keeps_empty_language_fields_for_act_capture():
+    annotation = parse_capture_task_annotation(
+        task_name="pick_place_batch_0807",
+        task_id="pick-red-block-to-blue-tray",
+        english="",
+        chinese="",
+    )
+
+    assert annotation["language_instruction_en"] == ""
+    assert annotation["language_instruction_zh"] == ""
+
+
+def test_capture_task_annotation_rejects_invalid_supplied_task_id():
+    with pytest.raises(ValueError, match="task_id"):
+        parse_capture_task_annotation(
+            task_name="pick_place_batch_0807",
+            task_id="pick/red-block",
+            english="Pick up the red block.",
+            chinese="",
+        )
 
 
 def test_writer_stores_original_qpos_schema_under_runtime_mode_directory(tmp_path):

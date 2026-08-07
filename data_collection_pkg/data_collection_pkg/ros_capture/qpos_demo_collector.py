@@ -199,6 +199,7 @@ class QposDemoJsonlRecorder:
         raw_command_topic: str = TELEOP_TOPICS["servo_l_command"],
         image_storage_format: str = "jpeg",
         jpeg_quality: int = 75,
+        episode_metadata: Mapping[str, Any] | None = None,
     ) -> None:
         self.builder = QposDemoFrameBuilder(
             required_cameras=required_cameras,
@@ -222,6 +223,7 @@ class QposDemoJsonlRecorder:
             converted_from=FUTURE_JOINT_STATE_ACTION,
             image_storage_format=image_storage_format,
             jpeg_quality=jpeg_quality,
+            episode_metadata=episode_metadata,
         )
         self._episode_started = False
         self.accepted_frames = 0
