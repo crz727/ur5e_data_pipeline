@@ -68,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-dir")
     output_group.add_argument("--output-root", dest="output_dir", help=argparse.SUPPRESS)
     convert.add_argument("--repo-id")
+    convert.add_argument("--profile", choices=("act", "vla"), default="act")
     convert.add_argument("--fps", type=float, default=15.0)
     convert.add_argument("--robot-type", default="ur5e")
     convert.add_argument("--camera", action="append", default=[])
@@ -156,6 +157,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             Path(args.dataset_dir),
             output_dir=Path(args.output_dir),
             repo_id=args.repo_id,
+            profile=args.profile,
             fps=args.fps,
             robot_type=args.robot_type,
             cameras=tuple(_camera_mapping(value) for value in args.camera),

@@ -17,7 +17,6 @@ class LeRobotDatasetWriter:
         root: Path,
         schema_name: str,
         *,
-        task: str,
         repo_id: str,
         fps: float = 15.0,
         robot_type: str = "ur5e",
@@ -33,7 +32,6 @@ class LeRobotDatasetWriter:
         self.schema: ActionSchema = get_schema(schema_name)
         if not self.schema.lerobot_compatible:
             raise ValueError(f"{schema_name} does not support LeRobotDataset")
-        self.task = str(task)
         self.repo_id = str(repo_id)
         self.fps = float(fps)
         self.robot_type = str(robot_type)
@@ -66,18 +64,25 @@ class LeRobotDatasetWriter:
             **create_kwargs,
         )
         self._episode_index = -1
+        self._episode_task: Optional[str] = None
 
-    def start_episode(self) -> Episode:
+    def start_episode(self, *, task: str) -> Episode:
         """Start a LeRobot episode."""
+        self._episode_task = str(task).strip()
+        if not self._episode_task:
+            self._episode_task = None
+            raise ValueError("LeRobot episode task must be non-empty")
         self._episode_index += 1
         return Episode(index=self._episode_index, path=self.dataset_dir)
 
     def add_frame(self, observation: Mapping[str, Any], action: Any) -> None:
         """Append one frame to the official dataset."""
+        if self._episode_task is None:
+            raise RuntimeError("start_episode must be called before add_frame")
         frame = {
             "observation.state": np.asarray(observation["state"], dtype=np.float32),
             "action": np.asarray(action, dtype=np.float32),
-            "task": self.task,
+            "task": self._episode_task,
         }
         if frame["observation.state"].shape != (7,):
             raise ValueError("observation.state must contain 7 values")
@@ -97,6 +102,7 @@ class LeRobotDatasetWriter:
     def close_episode(self) -> None:
         """Save the current episode."""
         self.dataset.save_episode()
+        self._episode_task = None
 
     def finalize(self) -> None:
         """Finalize the dataset when the official API supports it."""
