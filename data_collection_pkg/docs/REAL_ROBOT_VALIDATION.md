@@ -75,7 +75,7 @@ Run this checklist with one disposable real-robot capture and retain the
 resulting paths and reports with the validation record:
 
 1. Create Task `pick_place_batch_0807`.
-2. Set task ID `pick_red_block_to_blue_tray` and enter both English and
+2. Set task ID `pick-red-block-to-blue-tray` and enter both English and
    Chinese instructions (for example, “Pick the red block to the blue tray” /
    “把红色方块放到蓝色托盘”). Task is the dataset/task-root name; task ID is
    the stable per-instruction identifier and must not be substituted for the
