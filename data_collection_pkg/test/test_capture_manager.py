@@ -309,6 +309,31 @@ def test_capture_manager_forwards_normalized_vla_profile_and_rejects_invalid_pro
     assert invalid_result == {"ok": False, "error": "profile must be act or vla"}
 
 
+def test_capture_manager_rejects_existing_lerobot_output_before_converter(tmp_path):
+    converter_called = False
+
+    def fake_converter(*_args, **_kwargs):
+        nonlocal converter_called
+        converter_called = True
+        return {"output_dir": "unexpected"}
+
+    output_dir = tmp_path / "lerobot"
+    output_dir.mkdir()
+    manager = CaptureManager(root=tmp_path, converter=fake_converter)
+
+    result = manager.export_lerobot({
+        "cleaned_dataset_dir": str(tmp_path / "cleaned"),
+        "output_dir": str(output_dir),
+        "profile": "act",
+    })
+
+    assert result == {
+        "ok": False,
+        "error": f"output directory already exists: {output_dir}; choose a new path",
+    }
+    assert converter_called is False
+
+
 def test_capture_manager_background_export_forwards_vla_profile(tmp_path):
     started = threading.Event()
     release = threading.Event()

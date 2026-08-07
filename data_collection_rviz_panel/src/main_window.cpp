@@ -1400,6 +1400,8 @@ void MainWindow::request_lerobot_export(
     return;
   }
   if (lerobot_export_in_progress_) {
+    show_temporary_capture_status(QStringLiteral("LeRobot export already running (%1)")
+      .arg(lerobot_export_profile_.toUpper()));
     return;
   }
   const QString normalized_profile = profile.trimmed().toLower();
@@ -1423,11 +1425,16 @@ void MainWindow::request_lerobot_export(
   connect(dialog, &QFileDialog::fileSelected, this,
     [this, cleaned_dataset_dir, normalized_profile, profile_label](const QString & output_parent) {
     bool accepted = false;
-    const QString default_name = normalized_profile == QStringLiteral("vla") ?
+    QString default_output_name = normalized_profile == QStringLiteral("vla") ?
       QStringLiteral("lerobot_vla_v3") : QStringLiteral("lerobot_act_v3");
+    QString suggested_output_name = default_output_name;
+    int suffix = 1;
+    while (QDir(output_parent).exists(suggested_output_name)) {
+      suggested_output_name = QStringLiteral("%1_%2").arg(default_output_name).arg(suffix++);
+    }
     const QString output_name = QInputDialog::getText(
       this, QStringLiteral("%1 Output Name").arg(profile_label), QStringLiteral("Directory name"),
-      QLineEdit::Normal, default_name, &accepted).trimmed();
+      QLineEdit::Normal, suggested_output_name, &accepted).trimmed();
     if (!accepted || output_name.isEmpty()) {
       lerobot_export_in_progress_ = false;
       request_dashboard_state();
@@ -1440,6 +1447,12 @@ void MainWindow::request_lerobot_export(
       return;
     }
     const QString output_dir = QDir(output_parent).filePath(output_name);
+    if (QDir(output_dir).exists()) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(
+        QStringLiteral("%1 export output already exists; choose a new name").arg(profile_label));
+      return;
+    }
     if (normalized_profile == QStringLiteral("vla")) {
       request_lerobot_export_preflight(cleaned_dataset_dir, normalized_profile, output_dir);
       return;

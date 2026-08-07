@@ -87,6 +87,9 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "dialog->open();" in main_window
     assert 'QStringLiteral("/api/capture/export-lerobot/status")' in main_window
     assert "lerobot_export_in_progress_" in main_window
+    assert "LeRobot export already running" in main_window
+    assert "while (QDir(output_parent).exists(suggested_output_name))" in main_window
+    assert "output already exists; choose a new name" in main_window
     assert "&QLineEdit::editingFinished" in main_window
     assert "replay_status_value_" in main_window
     assert "root_scroll" not in main_window
@@ -211,3 +214,15 @@ def test_export_status_transport_failures_keep_workflow_guard_and_retry():
     assert 'if (status == QStringLiteral("failed"))' in status_source
     assert status_source.count("lerobot_export_in_progress_ = false") == 2
     assert status_source.count("QTimer::singleShot(1000") == 2
+
+
+def test_export_click_while_busy_reports_status_instead_of_silent_return():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
+        encoding="utf-8"
+    )
+    request_method = main_window[main_window.index("void MainWindow::request_lerobot_export("):]
+    busy_guard = request_method[:request_method.index("const QString normalized_profile")]
+
+    assert "if (lerobot_export_in_progress_)" in busy_guard
+    assert "show_temporary_capture_status" in busy_guard
+    assert "LeRobot export already running" in busy_guard

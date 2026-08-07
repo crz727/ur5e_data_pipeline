@@ -234,6 +234,10 @@ class CaptureManager:
                 raise ValueError("output_dir is required")
             cleaned_dataset_dir = Path(cleaned_value).expanduser()
             output_dir = Path(output_value).expanduser()
+            if output_dir.exists():
+                raise ValueError(
+                    f"output directory already exists: {output_dir}; choose a new path"
+                )
             profile = str(payload.get("profile", "act")).strip().lower()
             if profile not in {"act", "vla"}:
                 raise ValueError("profile must be act or vla")
@@ -270,6 +274,10 @@ class CaptureManager:
                 raise ValueError("profile must be a non-empty string")
             cleaned_dataset_dir = Path(cleaned_value.strip()).expanduser()
             output_dir = Path(output_value.strip()).expanduser()
+            if output_dir.exists():
+                raise ValueError(
+                    f"output directory already exists: {output_dir}; choose a new path"
+                )
             result = preflight_jsonl_to_lerobot(cleaned_dataset_dir, profile.strip())
             if result["profile"] == "vla":
                 result["planned_report_path"] = str(
