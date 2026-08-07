@@ -40,6 +40,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -535,6 +536,17 @@ void set_text_preserving_scroll(QPlainTextEdit * panel, const QString & text)
     std::min(previous_value, scroll_bar->maximum()));
 }
 
+QString suggest_task_id(const QString & english_instruction)
+{
+  QStringList tokens;
+  const QRegularExpression token_pattern(QStringLiteral("[a-z0-9]+"));
+  auto matches = token_pattern.globalMatch(english_instruction.toLower());
+  while (matches.hasNext()) {
+    tokens.push_back(matches.next().captured());
+  }
+  return tokens.join(QLatin1Char('-'));
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget * parent)
@@ -677,6 +689,8 @@ void MainWindow::build_ui()
   capture_task_ = new QLineEdit(QStringLiteral("teleop_segment_01"), capture_box);
   dataset_path_value_ = make_value_label(QStringLiteral("Dataset Path -"));
   auto * new_task = new QPushButton(QStringLiteral("New Task"), capture_box);
+  language_instruction_button_ = new QPushButton(QStringLiteral("Language: not set"), capture_box);
+  language_instruction_button_->setToolTip(QStringLiteral("Language Instruction"));
   capture_toggle_button_ = new QPushButton(QStringLiteral("Start Capture"), capture_box);
   clean_dataset_button_ = new QPushButton(QStringLiteral("Clean Data"), capture_box);
   capture_status_value_ = make_value_label(QStringLiteral("Idle"));
@@ -684,6 +698,7 @@ void MainWindow::build_ui()
   capture_layout->addWidget(capture_mode_, 0, 1);
   capture_layout->addWidget(new QLabel(QStringLiteral("Task")), 1, 0);
   capture_layout->addWidget(capture_task_, 1, 1);
+  capture_layout->addWidget(language_instruction_button_, 1, 2);
   capture_layout->addWidget(new_task, 2, 0);
   capture_layout->addWidget(capture_toggle_button_, 2, 1);
   capture_layout->addWidget(clean_dataset_button_, 2, 2);
@@ -693,6 +708,9 @@ void MainWindow::build_ui()
   connect(new_task, &QPushButton::clicked, this, [this]() {
     post_json(QStringLiteral("/api/capture/new-task"), {{QStringLiteral("task"), capture_task_->text()}});
   });
+  connect(
+    language_instruction_button_, &QPushButton::clicked,
+    this, &MainWindow::request_language_instruction_editor);
   connect(capture_toggle_button_, &QPushButton::clicked, this, [this]() {
     if (capture_running_) {
       request_capture_stop_and_annotation();
@@ -700,7 +718,10 @@ void MainWindow::build_ui()
     }
     post_json(QStringLiteral("/api/capture/start"), {
       {QStringLiteral("runtime_mode"), capture_mode_->currentText()},
-      {QStringLiteral("task"), capture_task_->text()}});
+      {QStringLiteral("task"), capture_task_->text()},
+      {QStringLiteral("task_id"), capture_task_id_},
+      {QStringLiteral("language_instruction_en"), capture_language_instruction_en_},
+      {QStringLiteral("language_instruction_zh"), capture_language_instruction_zh_}});
   });
   connect(clean_dataset_button_, &QPushButton::clicked, this, [this]() {
     if (capture_running_ || capture_dataset_path_.isEmpty()) {
@@ -1100,6 +1121,123 @@ void MainWindow::request_capture_annotation(const QString & outcome)
   });
 }
 
+void MainWindow::request_language_instruction_editor()
+{
+  const auto reply = network_->get(QNetworkRequest(
+    QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/task-labels"))));
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const QByteArray body = reply->readAll();
+    const bool transport_ok = reply->error() == QNetworkReply::NoError;
+    const QString transport_error = reply->errorString();
+    reply->deleteLater();
+    const QJsonDocument document = QJsonDocument::fromJson(body);
+    const QJsonObject response = document.object();
+    if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
+      const QString error = document.isObject() ?
+        response.value(QStringLiteral("error")).toString() : transport_error;
+      QMessageBox::warning(
+        this, QStringLiteral("Language Instruction"),
+        QStringLiteral("Task labels unavailable: %1").arg(
+          error.isEmpty() ? QStringLiteral("backend unavailable") : error));
+      return;
+    }
+    show_language_instruction_editor(response.value(QStringLiteral("labels")).toArray());
+  });
+}
+
+void MainWindow::show_language_instruction_editor(const QJsonArray & labels)
+{
+  QDialog dialog(this);
+  dialog.setWindowTitle(QStringLiteral("Language Instruction"));
+  dialog.setModal(true);
+  auto * dialog_layout = new QVBoxLayout(&dialog);
+  auto * form_layout = new QFormLayout;
+  auto * task_id = new QComboBox(&dialog);
+  task_id->setEditable(true);
+  task_id->setInsertPolicy(QComboBox::NoInsert);
+  task_id->addItem(QString());
+  for (const QJsonValue & value : labels) {
+    const QJsonObject label = value.toObject();
+    const QString id = label.value(QStringLiteral("task_id")).toString();
+    if (!id.isEmpty()) {
+      task_id->addItem(id, label.toVariantMap());
+    }
+  }
+  auto * english = new QPlainTextEdit(&dialog);
+  auto * chinese = new QPlainTextEdit(&dialog);
+  english->setMinimumHeight(90);
+  chinese->setMinimumHeight(90);
+  english->setPlainText(capture_language_instruction_en_);
+  chinese->setPlainText(capture_language_instruction_zh_);
+  form_layout->addRow(QStringLiteral("Task ID"), task_id);
+  form_layout->addRow(QStringLiteral("English instruction"), english);
+  form_layout->addRow(QStringLiteral("中文指令"), chinese);
+  dialog_layout->addLayout(form_layout);
+
+  const auto fill_known_label = [task_id, english, chinese]() {
+    const QVariant data = task_id->currentData();
+    if (!data.isValid()) {
+      return;
+    }
+    const QVariantMap label = data.toMap();
+    english->setPlainText(label.value(QStringLiteral("language_instruction_en")).toString());
+    chinese->setPlainText(label.value(QStringLiteral("language_instruction_zh")).toString());
+  };
+  connect(task_id, &QComboBox::currentTextChanged, &dialog,
+    [task_id, fill_known_label](const QString & text) {
+      const int index = task_id->findText(text, Qt::MatchFixedString);
+      if (index >= 0) {
+        task_id->setCurrentIndex(index);
+        fill_known_label();
+      }
+    });
+
+  if (!capture_task_id_.isEmpty()) {
+    const int index = task_id->findText(capture_task_id_, Qt::MatchFixedString);
+    if (index >= 0) {
+      task_id->setCurrentIndex(index);
+      fill_known_label();
+    } else {
+      task_id->setEditText(capture_task_id_);
+    }
+  }
+
+  auto previous_suggestion = std::make_shared<QString>();
+  connect(english, &QPlainTextEdit::textChanged, &dialog,
+    [task_id, english, previous_suggestion]() {
+      const QString current_id = task_id->currentText().trimmed();
+      if (!current_id.isEmpty() && current_id != *previous_suggestion) {
+        return;
+      }
+      *previous_suggestion = suggest_task_id(english->toPlainText());
+      task_id->setEditText(*previous_suggestion);
+    });
+
+  auto * actions = new QHBoxLayout;
+  actions->addStretch(1);
+  auto * save = new QPushButton(QStringLiteral("Save"), &dialog);
+  auto * cancel = new QPushButton(QStringLiteral("Cancel"), &dialog);
+  actions->addWidget(save);
+  actions->addWidget(cancel);
+  dialog_layout->addLayout(actions);
+  connect(save, &QPushButton::clicked, &dialog, &QDialog::accept);
+  connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+  if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+
+  capture_task_id_ = task_id->currentText().trimmed();
+  capture_language_instruction_en_ = english->toPlainText().trimmed();
+  capture_language_instruction_zh_ = chinese->toPlainText().trimmed();
+  if (capture_task_id_.isEmpty() && !capture_language_instruction_en_.isEmpty()) {
+    capture_task_id_ = suggest_task_id(capture_language_instruction_en_);
+  }
+  const bool language_ready = !capture_task_id_.isEmpty() ||
+    !capture_language_instruction_en_.isEmpty() || !capture_language_instruction_zh_.isEmpty();
+  language_instruction_button_->setText(language_ready ?
+    QStringLiteral("Language: ready") : QStringLiteral("Language: not set"));
+}
+
 void MainWindow::update_capture_toggle()
 {
   if (capture_toggle_button_ == nullptr) {
@@ -1112,6 +1250,9 @@ void MainWindow::update_capture_toggle()
   if (clean_dataset_button_ != nullptr) {
     clean_dataset_button_->setEnabled(
       !capture_running_ && !capture_dataset_path_.isEmpty() && !cleaning_in_progress_);
+  }
+  if (language_instruction_button_ != nullptr) {
+    language_instruction_button_->setEnabled(!capture_running_);
   }
 }
 
@@ -1161,12 +1302,15 @@ void MainWindow::request_dataset_cleaning()
         result_dialog));
       auto * result_actions = new QHBoxLayout();
       auto * open_report = new QPushButton(QStringLiteral("Open Report"), result_dialog);
-      auto * export_lerobot = accepted > 0 ?
-        new QPushButton(QStringLiteral("Export LeRobot"), result_dialog) : nullptr;
+      auto * export_act = accepted > 0 ?
+        new QPushButton(QStringLiteral("Export ACT"), result_dialog) : nullptr;
+      auto * export_vla = accepted > 0 ?
+        new QPushButton(QStringLiteral("Export VLA"), result_dialog) : nullptr;
       auto * close_result = new QPushButton(QStringLiteral("Close"), result_dialog);
       result_actions->addWidget(open_report);
-      if (export_lerobot != nullptr) {
-        result_actions->addWidget(export_lerobot);
+      if (export_act != nullptr && export_vla != nullptr) {
+        result_actions->addWidget(export_act);
+        result_actions->addWidget(export_vla);
       }
       result_actions->addStretch(1);
       result_actions->addWidget(close_result);
@@ -1174,10 +1318,13 @@ void MainWindow::request_dataset_cleaning()
       connect(open_report, &QPushButton::clicked, this, [report_path]() {
         QDesktopServices::openUrl(QUrl::fromLocalFile(report_path));
       });
-      if (export_lerobot != nullptr) {
+      if (export_act != nullptr && export_vla != nullptr) {
         const QString cleaned_dataset_dir = response.value(QStringLiteral("cleaned_dataset_dir")).toString();
-        connect(export_lerobot, &QPushButton::clicked, this, [this, cleaned_dataset_dir]() {
-          request_lerobot_export(cleaned_dataset_dir);
+        connect(export_act, &QPushButton::clicked, this, [this, cleaned_dataset_dir]() {
+          request_lerobot_export(cleaned_dataset_dir, QStringLiteral("act"));
+        });
+        connect(export_vla, &QPushButton::clicked, this, [this, cleaned_dataset_dir]() {
+          request_lerobot_export(cleaned_dataset_dir, QStringLiteral("vla"));
         });
       }
       connect(close_result, &QPushButton::clicked, result_dialog, &QDialog::close);
@@ -1187,37 +1334,66 @@ void MainWindow::request_dataset_cleaning()
   });
 }
 
-void MainWindow::request_lerobot_export(const QString & cleaned_dataset_dir)
+void MainWindow::request_lerobot_export(
+  const QString & cleaned_dataset_dir, const QString & profile)
 {
   if (cleaned_dataset_dir.isEmpty()) {
     capture_status_value_->setText(QStringLiteral("LeRobot export unavailable: cleaned dataset path missing"));
     return;
   }
-  auto * dialog = new QFileDialog(this, QStringLiteral("Select LeRobot Output Parent Directory"));
+  if (lerobot_export_in_progress_) {
+    capture_status_value_->setText(QStringLiteral("LeRobot export already running"));
+    return;
+  }
+  const QString normalized_profile = profile.trimmed().toLower();
+  if (normalized_profile != QStringLiteral("act") && normalized_profile != QStringLiteral("vla")) {
+    capture_status_value_->setText(QStringLiteral("LeRobot export unavailable: unknown profile"));
+    return;
+  }
+  const QString profile_label = normalized_profile.toUpper();
+  auto * dialog = new QFileDialog(
+    this, QStringLiteral("Select %1 Output Parent Directory").arg(profile_label));
   dialog->setFileMode(QFileDialog::Directory);
   dialog->setOption(QFileDialog::ShowDirsOnly, true);
   dialog->setOption(QFileDialog::DontUseNativeDialog, true);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
-  connect(dialog, &QFileDialog::fileSelected, this, [this, cleaned_dataset_dir](const QString & output_parent) {
+  connect(dialog, &QFileDialog::fileSelected, this,
+    [this, cleaned_dataset_dir, normalized_profile, profile_label](const QString & output_parent) {
     bool accepted = false;
+    const QString default_name = normalized_profile == QStringLiteral("vla") ?
+      QStringLiteral("lerobot_vla_v3") : QStringLiteral("lerobot_act_v3");
     const QString output_name = QInputDialog::getText(
-      this, QStringLiteral("LeRobot Output Name"), QStringLiteral("Directory name"),
-      QLineEdit::Normal, QStringLiteral("lerobot_export"), &accepted).trimmed();
+      this, QStringLiteral("%1 Output Name").arg(profile_label), QStringLiteral("Directory name"),
+      QLineEdit::Normal, default_name, &accepted).trimmed();
     if (!accepted || output_name.isEmpty() || output_name.contains(QLatin1Char('/'))) {
       return;
     }
     const QString output_dir = QDir(output_parent).filePath(output_name);
-    capture_status_value_->setText(QStringLiteral("LeRobot export queued..."));
-    QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot")));
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    const QJsonObject payload{
-      {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
-      {QStringLiteral("output_dir"), output_dir},
-      {QStringLiteral("fps"), 15.0},
-      {QStringLiteral("cameras"), QJsonArray{QStringLiteral("external"), QStringLiteral("wrist")}},
-    };
-    const auto reply = network_->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (normalized_profile == QStringLiteral("vla")) {
+      request_lerobot_export_preflight(cleaned_dataset_dir, normalized_profile, output_dir);
+      return;
+    }
+    start_lerobot_export(cleaned_dataset_dir, normalized_profile, output_dir);
+  });
+  dialog->open();
+}
+
+void MainWindow::request_lerobot_export_preflight(
+  const QString & cleaned_dataset_dir, const QString & profile, const QString & output_dir)
+{
+  capture_status_value_->setText(QStringLiteral("VLA export preflight..."));
+  QNetworkRequest request(QUrl(
+    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot/preflight")));
+  request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+  const QJsonObject payload{
+    {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
+    {QStringLiteral("output_dir"), output_dir},
+    {QStringLiteral("profile"), profile},
+  };
+  const auto reply = network_->post(
+    request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+  connect(reply, &QNetworkReply::finished, this,
+    [this, cleaned_dataset_dir, profile, output_dir, reply]() {
     const QByteArray body = reply->readAll();
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
     const QString transport_error = reply->errorString();
@@ -1225,23 +1401,75 @@ void MainWindow::request_lerobot_export(const QString & cleaned_dataset_dir)
     const QJsonDocument document = QJsonDocument::fromJson(body);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
-      const QString error = document.isObject() ? response.value(QStringLiteral("error")).toString() : transport_error;
-      capture_status_value_->setText(QStringLiteral("LeRobot export could not start: %1").arg(error));
+      const QString error = document.isObject() ?
+        response.value(QStringLiteral("error")).toString() : transport_error;
+      capture_status_value_->setText(QStringLiteral("VLA export preflight failed: %1").arg(
+        error.isEmpty() ? QStringLiteral("backend unavailable") : error));
       return;
     }
-    capture_status_value_->setText(QStringLiteral("LeRobot export running..."));
+    const int eligible_count = response.value(QStringLiteral("eligible")).toArray().size();
+    const int skipped_count = response.value(QStringLiteral("skipped")).toArray().size();
+    const QString planned_report_path =
+      response.value(QStringLiteral("planned_report_path")).toString(
+      QDir(output_dir).filePath(QStringLiteral("meta/vla_export_report.json")));
+    const QString message = QStringLiteral(
+      "Eligible episodes: %1\nSkipped episodes: %2\n\nPlanned report:\n%3\n\nStart VLA export?")
+      .arg(eligible_count).arg(skipped_count).arg(planned_report_path);
+    const auto choice = QMessageBox::question(
+      this, QStringLiteral("Confirm VLA Export"), message,
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (choice != QMessageBox::Yes) {
+      capture_status_value_->setText(QStringLiteral("VLA export cancelled"));
+      return;
+    }
+    start_lerobot_export(cleaned_dataset_dir, profile, output_dir);
+  });
+}
+
+void MainWindow::start_lerobot_export(
+  const QString & cleaned_dataset_dir, const QString & profile, const QString & output_dir)
+{
+  const QString profile_label = profile.toUpper();
+  lerobot_export_profile_ = profile;
+  capture_status_value_->setText(QStringLiteral("%1 export queued...").arg(profile_label));
+  QNetworkRequest request(QUrl(
+    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot")));
+  request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+  const QJsonObject payload{
+    {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
+    {QStringLiteral("output_dir"), output_dir},
+    {QStringLiteral("profile"), profile},
+    {QStringLiteral("fps"), 15.0},
+    {QStringLiteral("cameras"), QJsonArray{QStringLiteral("external"), QStringLiteral("wrist")}},
+  };
+  const auto reply = network_->post(
+    request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+  connect(reply, &QNetworkReply::finished, this, [this, profile_label, reply]() {
+    const QByteArray body = reply->readAll();
+    const bool transport_ok = reply->error() == QNetworkReply::NoError;
+    const QString transport_error = reply->errorString();
+    reply->deleteLater();
+    const QJsonDocument document = QJsonDocument::fromJson(body);
+    const QJsonObject response = document.object();
+    if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
+      const QString error = document.isObject() ?
+        response.value(QStringLiteral("error")).toString() : transport_error;
+      capture_status_value_->setText(QStringLiteral("%1 export could not start: %2").arg(
+        profile_label, error.isEmpty() ? QStringLiteral("backend unavailable") : error));
+      return;
+    }
+    capture_status_value_->setText(QStringLiteral("%1 export running...").arg(profile_label));
     lerobot_export_in_progress_ = true;
     request_lerobot_export_status();
-    });
   });
-  dialog->open();
 }
 
 void MainWindow::request_lerobot_export_status()
 {
+  const QString profile_label = lerobot_export_profile_.toUpper();
   const auto reply = network_->get(QNetworkRequest(
     QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot/status"))));
-  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+  connect(reply, &QNetworkReply::finished, this, [this, profile_label, reply]() {
     const QByteArray body = reply->readAll();
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
     const QString transport_error = reply->errorString();
@@ -1250,20 +1478,21 @@ void MainWindow::request_lerobot_export_status()
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject()) {
       lerobot_export_in_progress_ = false;
-      capture_status_value_->setText(QStringLiteral("LeRobot export status unavailable: %1").arg(transport_error));
+      capture_status_value_->setText(QStringLiteral("%1 export status unavailable: %2").arg(
+        profile_label, transport_error));
       return;
     }
     const QString status = response.value(QStringLiteral("status")).toString();
     if (status == QStringLiteral("queued") || status == QStringLiteral("running")) {
-      capture_status_value_->setText(QStringLiteral("LeRobot export %1...").arg(status));
+      capture_status_value_->setText(QStringLiteral("%1 export %2...").arg(profile_label, status));
       QTimer::singleShot(500, this, &MainWindow::request_lerobot_export_status);
       return;
     }
     if (status == QStringLiteral("done")) {
       lerobot_export_in_progress_ = false;
       const QJsonObject result = response.value(QStringLiteral("result")).toObject();
-      capture_status_value_->setText(QStringLiteral("LeRobot export complete: %1").arg(
-        result.value(QStringLiteral("output_dir")).toString()));
+      capture_status_value_->setText(QStringLiteral("%1 export complete: %2").arg(
+        profile_label, result.value(QStringLiteral("output_dir")).toString()));
       const QString report_path = result.value(QStringLiteral("verification_report_path")).toString();
       if (!report_path.isEmpty()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(report_path));
@@ -1271,7 +1500,8 @@ void MainWindow::request_lerobot_export_status()
       return;
     }
     lerobot_export_in_progress_ = false;
-    capture_status_value_->setText(QStringLiteral("LeRobot export failed: %1").arg(
+    capture_status_value_->setText(QStringLiteral("%1 export failed: %2").arg(
+      profile_label,
       response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
   });
 }
