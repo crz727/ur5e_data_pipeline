@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional
 
 from data_collection_pkg.dataset.cleaner import clean_original_dataset
-from data_collection_pkg.dataset.converter import convert_jsonl_to_lerobot
+from data_collection_pkg.dataset.converter import (
+    convert_jsonl_to_lerobot,
+    preflight_jsonl_to_lerobot,
+)
 from data_collection_pkg.dataset.task_annotations import (
     load_task_catalog,
     parse_capture_task_annotation,
@@ -243,6 +246,29 @@ class CaptureManager:
             )
             return {"ok": True, **result}
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def preflight_lerobot_export(self, payload: Mapping) -> dict:
+        """Report LeRobot export eligibility without writing an output dataset."""
+        if self._is_running():
+            return {"ok": False, "error": "stop capture before exporting LeRobot"}
+        try:
+            cleaned_value = str(payload.get("cleaned_dataset_dir", "")).strip()
+            output_value = str(payload.get("output_dir", "")).strip()
+            profile = str(payload.get("profile", "act")).strip()
+            if not cleaned_value:
+                raise ValueError("cleaned_dataset_dir is required")
+            if not output_value:
+                raise ValueError("output_dir is required")
+            cleaned_dataset_dir = Path(cleaned_value).expanduser()
+            output_dir = Path(output_value).expanduser()
+            result = preflight_jsonl_to_lerobot(cleaned_dataset_dir, profile)
+            if result["profile"] == "vla":
+                result["planned_report_path"] = str(
+                    output_dir / "meta" / "vla_export_report.json"
+                )
+            return {"ok": True, **result}
+        except (OSError, RuntimeError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
     def start_lerobot_export(self, payload: Mapping) -> dict:

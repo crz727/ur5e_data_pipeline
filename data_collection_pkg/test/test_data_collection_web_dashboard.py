@@ -178,6 +178,19 @@ def test_dashboard_capture_api_delegates_to_manager():
             self.clean_payload = payload
             return {"ok": True, "accepted_episode_indices": [0], "report_path": "/tmp/report.html"}
 
+        def task_labels(self):
+            return {"ok": True, "labels": [{"task_id": "pick_red_block"}]}
+
+        def preflight_lerobot_export(self, payload):
+            self.preflight_payload = payload
+            return {
+                "ok": True,
+                "profile": "vla",
+                "eligible": [{"episode_index": 10}],
+                "skipped": [{"episode_index": 11, "reason": "missing_english_instruction"}],
+                "planned_report_path": "/tmp/lerobot-export/meta/vla_export_report.json",
+            }
+
         def export_lerobot(self, payload):
             self.export_payload = payload
             return {"ok": True, "output_dir": payload["output_dir"], "verification_report_path": "/tmp/export-report.json"}
@@ -210,6 +223,15 @@ def test_dashboard_capture_api_delegates_to_manager():
         "/api/capture/clean",
         json={"dataset_dir": "/tmp/original/teleop/qpos_gripper"},
     )
+    labels = client.get("/api/capture/task-labels")
+    preflight = client.post(
+        "/api/capture/export-lerobot/preflight",
+        json={
+            "cleaned_dataset_dir": "/tmp/cleaned/teleop/qpos_gripper",
+            "output_dir": "/tmp/lerobot-export",
+            "profile": "vla",
+        },
+    )
     exported = client.post(
         "/api/capture/export-lerobot",
         json={
@@ -232,6 +254,11 @@ def test_dashboard_capture_api_delegates_to_manager():
     assert cleaned.status_code == 200
     assert cleaned.get_json()["report_path"] == "/tmp/report.html"
     assert manager.clean_payload == {"dataset_dir": "/tmp/original/teleop/qpos_gripper"}
+    assert labels.status_code == 200
+    assert labels.get_json()["labels"] == [{"task_id": "pick_red_block"}]
+    assert preflight.status_code == 200
+    assert preflight.get_json()["planned_report_path"].endswith("vla_export_report.json")
+    assert manager.preflight_payload["profile"] == "vla"
     export_status = client.get("/api/capture/export-lerobot/status")
 
     assert exported.status_code == 202
@@ -239,3 +266,16 @@ def test_dashboard_capture_api_delegates_to_manager():
     assert export_status.status_code == 200
     assert export_status.get_json()["status"] == "running"
     assert manager.export_payload["cleaned_dataset_dir"].endswith("qpos_gripper")
+
+
+def test_dashboard_preflight_and_task_labels_require_capture_controls():
+    app = create_dashboard_app(DashboardStateStore())
+    client = app.test_client()
+
+    labels = client.get("/api/capture/task-labels")
+    preflight = client.post("/api/capture/export-lerobot/preflight", json={})
+
+    assert labels.status_code == 409
+    assert labels.get_json()["error"] == "capture controls disabled"
+    assert preflight.status_code == 409
+    assert preflight.get_json()["error"] == "capture controls disabled"

@@ -344,6 +344,20 @@ def create_dashboard_app(store: DashboardStateStore, capture_manager=None) -> Fl
         result = capture_manager.clean(request.get_json(silent=True) or {})
         return jsonify(result), 200 if result.get("ok") else 409
 
+    @app.get("/api/capture/task-labels")
+    def api_capture_task_labels():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 409
+        result = capture_manager.task_labels()
+        return jsonify(result), 200 if result.get("ok") else 409
+
+    @app.post("/api/capture/export-lerobot/preflight")
+    def api_capture_export_lerobot_preflight():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 409
+        result = capture_manager.preflight_lerobot_export(request.get_json(silent=True) or {})
+        return jsonify(result), 200 if result.get("ok") else 409
+
     @app.post("/api/capture/export-lerobot")
     def api_capture_export_lerobot():
         if capture_manager is None:
