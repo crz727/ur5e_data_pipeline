@@ -1553,10 +1553,16 @@ void MainWindow::request_lerobot_export_status()
       }
       return;
     }
-    lerobot_export_in_progress_ = false;
-    show_temporary_capture_status(QStringLiteral("%1 export failed: %2").arg(
-      profile_label,
-      response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
+    if (status == QStringLiteral("failed")) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("%1 export failed: %2").arg(
+        profile_label,
+        response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
+      return;
+    }
+    show_temporary_capture_status(QStringLiteral(
+      "%1 export status unavailable: invalid backend response").arg(profile_label));
+    QTimer::singleShot(1000, this, &MainWindow::request_lerobot_export_status);
   });
 }
 

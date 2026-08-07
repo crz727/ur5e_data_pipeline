@@ -170,6 +170,10 @@ def test_export_status_transport_failures_keep_workflow_guard_and_retry():
         encoding="utf-8"
     )
     status_method = main_window.index("void MainWindow::request_lerobot_export_status()")
+    status_method_end = main_window.index(
+        "void MainWindow::request_replay_episodes()", status_method
+    )
+    status_source = main_window[status_method:status_method_end]
     transient_start = main_window.index(
         "if (!transport_ok || !document.isObject()) {", status_method
     )
@@ -182,3 +186,6 @@ def test_export_status_transport_failures_keep_workflow_guard_and_retry():
     assert "QTimer::singleShot(1000" in transient_branch
     assert "request_lerobot_export_status" in transient_branch
     assert 'QStringLiteral("invalid backend response")' in transient_branch
+    assert 'if (status == QStringLiteral("failed"))' in status_source
+    assert status_source.count("lerobot_export_in_progress_ = false") == 2
+    assert status_source.count("QTimer::singleShot(1000") == 2
