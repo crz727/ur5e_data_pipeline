@@ -10,7 +10,15 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional
 
 from data_collection_pkg.dataset.cleaner import clean_original_dataset
-from data_collection_pkg.dataset.converter import convert_jsonl_to_lerobot
+from data_collection_pkg.dataset.converter import (
+    convert_jsonl_to_lerobot,
+    preflight_jsonl_to_lerobot,
+)
+from data_collection_pkg.dataset.task_annotations import (
+    load_task_catalog,
+    parse_capture_task_annotation,
+    register_task_label,
+)
 
 
 ALLOWED_RUNTIME_MODES = ("policy", "teleop", "http")
@@ -42,6 +50,7 @@ class CaptureManager:
         self._log_stream = None
         self.current_task = None
         self.current_task_root = None
+        self.current_task_annotation = {}
         self._episode_indices_before = set()
         self._last_stopped_episode_indices = ()
         self._last_stopped_dataset_dir = None
@@ -65,6 +74,7 @@ class CaptureManager:
         task_root.mkdir(parents=True, exist_ok=True)
         self.current_task = task
         self.current_task_root = task_root
+        self.current_task_annotation = {}
         return {
             "ok": True,
             "running": False,
@@ -95,9 +105,23 @@ class CaptureManager:
 
         task = self.current_task or _safe_task_name(payload.get("task") or f"{runtime_mode}_segment")
         task_root = self.current_task_root or self.root
+        try:
+            annotation = parse_capture_task_annotation(
+                task_name=task,
+                task_id=payload.get("task_id", ""),
+                english=payload.get("language_instruction_en", ""),
+                chinese=payload.get("language_instruction_zh", ""),
+            )
+            if annotation.get("task_id"):
+                register_task_label(self.root / "_task_catalog.jsonl", annotation, self.now())
+        except ValueError as exc:
+            return {"ok": False, "running": False, "error": str(exc)}
+        self.current_task_annotation = annotation
         dataset_stage = str(payload.get("dataset_stage", "original")).strip() or "original"
         dataset_dir = task_root / dataset_stage / runtime_mode / "qpos_gripper"
-        command = self._command(payload, runtime_mode, task, dataset_stage, task_root)
+        command = self._command(
+            payload, runtime_mode, task, dataset_stage, task_root, annotation
+        )
         task_root.mkdir(parents=True, exist_ok=True)
         self._episode_indices_before = _episode_indices(dataset_dir)
         self._last_stopped_episode_indices = ()
@@ -127,6 +151,13 @@ class CaptureManager:
             "task_root": str(task_root),
             "dataset_dir": str(dataset_dir),
             "log_path": str(self.log_path),
+        }
+
+    def task_labels(self) -> dict:
+        """Return registered task-language labels in most-recent-first order."""
+        return {
+            "ok": True,
+            "labels": load_task_catalog(self.root / "_task_catalog.jsonl"),
         }
 
     def stop(self) -> dict:
@@ -203,6 +234,9 @@ class CaptureManager:
                 raise ValueError("output_dir is required")
             cleaned_dataset_dir = Path(cleaned_value).expanduser()
             output_dir = Path(output_value).expanduser()
+            profile = str(payload.get("profile", "act")).strip().lower()
+            if profile not in {"act", "vla"}:
+                raise ValueError("profile must be act or vla")
             cameras = tuple(payload.get("cameras") or ("external", "wrist"))
             result = self.converter(
                 cleaned_dataset_dir,
@@ -212,9 +246,37 @@ class CaptureManager:
                 cameras=cameras,
                 visual_storage=str(payload.get("visual_storage", "video")),
                 video_codec=str(payload.get("video_codec", "h264")),
+                profile=profile,
             )
             return {"ok": True, **result}
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def preflight_lerobot_export(self, payload: Mapping) -> dict:
+        """Report LeRobot export eligibility without writing an output dataset."""
+        if self._is_running():
+            return {"ok": False, "error": "stop capture before exporting LeRobot"}
+        if not isinstance(payload, Mapping):
+            return {"ok": False, "error": "preflight payload must be a JSON object"}
+        try:
+            cleaned_value = payload.get("cleaned_dataset_dir", "")
+            output_value = payload.get("output_dir", "")
+            profile = payload.get("profile", "act")
+            if not isinstance(cleaned_value, str) or not cleaned_value.strip():
+                raise ValueError("cleaned_dataset_dir must be a non-empty string")
+            if not isinstance(output_value, str) or not output_value.strip():
+                raise ValueError("output_dir must be a non-empty string")
+            if not isinstance(profile, str) or not profile.strip():
+                raise ValueError("profile must be a non-empty string")
+            cleaned_dataset_dir = Path(cleaned_value.strip()).expanduser()
+            output_dir = Path(output_value.strip()).expanduser()
+            result = preflight_jsonl_to_lerobot(cleaned_dataset_dir, profile.strip())
+            if result["profile"] == "vla":
+                result["planned_report_path"] = str(
+                    output_dir / "meta" / "vla_export_report.json"
+                )
+            return {"ok": True, **result}
+        except (OSError, RuntimeError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
     def start_lerobot_export(self, payload: Mapping) -> dict:
@@ -312,6 +374,7 @@ class CaptureManager:
         task: str,
         dataset_stage: str,
         task_root: Path,
+        annotation: Mapping[str, object],
     ) -> list:
         command = [
             "ros2",
@@ -320,6 +383,9 @@ class CaptureManager:
             "data_collection_hardware_qpos.launch.py",
             f"root:={task_root}",
             f"task:={task}",
+            f"task_id:={annotation.get('task_id', '')}",
+            f"language_instruction_en:={annotation.get('language_instruction_en', '')}",
+            f"language_instruction_zh:={annotation.get('language_instruction_zh', '')}",
             f"dataset_stage:={dataset_stage}",
             f"runtime_mode:={runtime_mode}",
             f"sample_rate_hz:={payload.get('sample_rate_hz', 15.0)}",

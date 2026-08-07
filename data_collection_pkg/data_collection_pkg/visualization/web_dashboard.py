@@ -3,7 +3,7 @@
 import json
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from flask import Flask, jsonify, request, Response
 
@@ -342,6 +342,23 @@ def create_dashboard_app(store: DashboardStateStore, capture_manager=None) -> Fl
         if capture_manager is None:
             return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 404
         result = capture_manager.clean(request.get_json(silent=True) or {})
+        return jsonify(result), 200 if result.get("ok") else 409
+
+    @app.get("/api/capture/task-labels")
+    def api_capture_task_labels():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 409
+        result = capture_manager.task_labels()
+        return jsonify(result), 200 if result.get("ok") else 409
+
+    @app.post("/api/capture/export-lerobot/preflight")
+    def api_capture_export_lerobot_preflight():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 409
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, Mapping):
+            return jsonify({"ok": False, "error": "preflight payload must be a JSON object"}), 409
+        result = capture_manager.preflight_lerobot_export(payload)
         return jsonify(result), 200 if result.get("ok") else 409
 
     @app.post("/api/capture/export-lerobot")

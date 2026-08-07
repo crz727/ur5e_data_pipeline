@@ -69,6 +69,50 @@ Only cleaned qpos/gripper data is accepted as export input. The panel starts
 export as a background task, so the live camera, model, and replay controls
 remain usable while it runs.
 
+### Manual validation checklist
+
+Run this checklist with one disposable real-robot capture and retain the
+resulting paths and reports with the validation record:
+
+1. Create Task `pick_place_batch_0807`.
+2. Set task ID `pick-red-block-to-blue-tray` and enter both English and
+   Chinese instructions (for example, “Pick the red block to the blue tray” /
+   “把红色方块放到蓝色托盘”). Task is the dataset/task-root name; task ID is
+   the stable per-instruction identifier and must not be substituted for the
+   root folder.
+3. Capture, stop, and inspect
+   `original/teleop/qpos_gripper/meta/episodes.jsonl`. Each episode header must
+   contain the frozen task ID and English/Chinese language snapshot; do not
+   rely only on a mutable session file.
+4. Mark success, run **Clean Data**, and inspect
+   `cleaned/teleop/qpos_gripper/meta/episodes.jsonl`. Confirm accepted
+   annotations are inherited, rejected episodes are absent, and files under
+   `original/` are byte-for-byte unchanged. Keep the cleaning dialog open until
+   **Close**; export is asynchronous and may be started after cleaning returns.
+5. Export ACT from the cleaned directory and inspect the official LeRobot
+   artifacts: `meta/episodes/*.parquet`, `meta/info.json`, `meta/stats.json`,
+   `data/*.parquet`, `videos/observation.images.top/*.mp4`,
+   `videos/observation.images.wrist/*.mp4`, and
+   `meta/image_normalization.json`. Confirm 15 Hz, UR5e 7-D state/action,
+   top→external and wrist→wrist camera mapping. Image preprocessing is
+   `RGB / 255.0`, then ImageNet subtraction and division:
+   `(rgb_float - [0.485, 0.456, 0.406]) /
+   [0.229, 0.224, 0.225]`. The metadata documents this transform and must not
+   overwrite observed LeRobot statistics.
+6. Export VLA from the same cleaned directory and inspect the task mapping,
+   `meta/episode_language_annotations.jsonl` (English task plus retained
+   Chinese text), and `meta/vla_export_report.json`. Verify report eligible,
+   skipped, and source→output mapping counts against the source episode
+   headers. VLA task text is English; Chinese remains in the sidecar.
+7. Remove English (`language_instruction_en`) from one fixture episode; ACT
+   accepts the cleaned episode, while VLA skips it and records the episode index
+   and reason in `vla_export_report.json`. VLA must never silently drop an
+   episode.
+
+For every run, attach the command output and the paths checked above to the
+validation report. If no real robot is available, perform steps 3–7 against a
+cleaned fixture dataset and label the run as fixture-only.
+
 Command-line export is also available:
 
 ```bash
@@ -90,3 +134,15 @@ H.264 MP4 camera streams under `videos/`. Parquet contains state, action, task,
 and video time indices, not embedded image bytes. Video export requires an
 integer FPS; the current real-robot pipeline uses `15`. A valid dataset reports
 `480x640x3` for both current cameras.
+
+### Final review gates
+
+- Task creates/selects task-root folders independently from task ID.
+- Episode headers contain frozen language snapshots; cleaning preserves accepted
+  annotations without mutating original data.
+- ACT accepts unlabeled cleaned episodes. VLA exports only valid-English
+  episodes and records every skipped episode.
+- VLA task text is English, with Chinese retained in the sidecar.
+- Both profiles retain 15 Hz, UR5e 7-D state/action, top/wrist MP4 mapping, and
+  ImageNet metadata. ImageNet metadata does not replace measured LeRobot stats.
+- Cleaning remains open until **Close**, and exports run asynchronously.

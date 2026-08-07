@@ -57,9 +57,11 @@ def test_cli_convert_jsonl_to_lerobot_invokes_converter(tmp_path, monkeypatch, c
         calls.append((dataset_dir, kwargs))
         return {
             "episode_count": 1,
+            "skipped_count": 2,
             "frame_count": 2,
             "schema_name": "teleop_servo_l_pose",
             "repo_id": kwargs["repo_id"],
+            "profile": kwargs["profile"],
         }
 
     monkeypatch.setattr("data_collection_pkg.cli.convert_jsonl_to_lerobot", fake_convert)
@@ -74,18 +76,24 @@ def test_cli_convert_jsonl_to_lerobot_invokes_converter(tmp_path, monkeypatch, c
         "--fps",
         "10",
         "--camera",
-        "external",
+        "top=external",
         "--camera",
         "wrist",
+        "--profile",
+        "vla",
     ])
 
     assert code == 0
     assert calls[0][1]["repo_id"] == "local/teleop"
     assert calls[0][1]["fps"] == 10.0
-    assert calls[0][1]["cameras"] == (("external", "external"), ("wrist", "wrist"))
+    assert calls[0][1]["cameras"] == (("top", "external"), ("wrist", "wrist"))
+    assert calls[0][1]["profile"] == "vla"
     assert calls[0][1]["visual_storage"] == "video"
     assert calls[0][1]["video_codec"] == "h264"
-    assert '"frame_count": 2' in capsys.readouterr().out
+    output = json.loads(capsys.readouterr().out)
+    assert output["frame_count"] == 2
+    assert output["profile"] == "vla"
+    assert output["skipped_count"] == 2
 
 
 def test_cli_accepts_independent_repo_id_and_camera_mapping(tmp_path, monkeypatch, capsys):
@@ -110,6 +118,7 @@ def test_cli_accepts_independent_repo_id_and_camera_mapping(tmp_path, monkeypatc
     assert calls[0][1]["fps"] == 15.0
     assert calls[0][1]["cameras"] == (("pano", "external"),)
     assert calls[0][1]["visual_storage"] == "video"
+    assert calls[0][1]["profile"] == "act"
 
 
 def test_cli_lerobot_viz_invokes_launcher(tmp_path, monkeypatch, capsys):

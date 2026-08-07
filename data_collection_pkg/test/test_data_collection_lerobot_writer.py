@@ -33,12 +33,11 @@ def test_lerobot_writer_calls_official_dataset_api(tmp_path):
     writer = LeRobotDatasetWriter(
         tmp_path,
         "qpos_gripper",
-        task="pick",
         repo_id="local/ur5e_pick",
         dataset_cls=FakeLeRobotDataset,
     )
 
-    writer.start_episode()
+    writer.start_episode(task="pick")
     writer.add_frame(
         {"timestamp": 1.25, "state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3]},
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8],
@@ -60,7 +59,6 @@ def test_lerobot_writer_declares_camera_features(tmp_path):
     writer = LeRobotDatasetWriter(
         tmp_path,
         "teleop_servo_l_pose",
-        task="teleop",
         repo_id="local/teleop",
         cameras=("external", "wrist"),
         image_shape=(480, 640, 3),
@@ -82,7 +80,6 @@ def test_lerobot_writer_rejects_non_integer_video_fps(tmp_path):
         LeRobotDatasetWriter(
             tmp_path,
             "qpos_gripper",
-            task="pick",
             repo_id="local/pick",
             cameras=("wrist",),
             fps=12.5,
@@ -94,7 +91,6 @@ def test_lerobot_writer_can_keep_legacy_images_outside_video_mode(tmp_path):
     writer = LeRobotDatasetWriter(
         tmp_path,
         "qpos_gripper",
-        task="pick",
         repo_id="local/pick",
         cameras=("wrist",),
         visual_storage="image",
@@ -109,14 +105,13 @@ def test_lerobot_writer_converts_project_image_payloads_to_arrays(tmp_path):
     writer = LeRobotDatasetWriter(
         tmp_path,
         "teleop_servo_l_pose",
-        task="teleop",
         repo_id="local/teleop",
         cameras=("external", "wrist"),
         image_shape=(1, 1, 3),
         dataset_cls=FakeLeRobotDataset,
     )
 
-    writer.start_episode()
+    writer.start_episode(task="teleop")
     writer.add_frame(
         {
             "timestamp": 1.0,
@@ -142,7 +137,6 @@ def test_lerobot_writer_decodes_compressed_jpeg_payload(tmp_path):
     writer = LeRobotDatasetWriter(
         tmp_path,
         "qpos_gripper",
-        task="pick",
         repo_id="local/pick",
         cameras=("external",),
         image_shape=(2, 3, 3),
@@ -151,7 +145,7 @@ def test_lerobot_writer_decodes_compressed_jpeg_payload(tmp_path):
     buffer = BytesIO()
     Image.new("RGB", (3, 2), color=(10, 20, 30)).save(buffer, format="JPEG")
 
-    writer.start_episode()
+    writer.start_episode(task="pick")
     writer.add_frame(
         {
             "state": [0.0] * 7,
@@ -167,13 +161,12 @@ def test_lerobot_writer_declares_and_writes_end_effector_pose(tmp_path):
     writer = LeRobotDatasetWriter(
         tmp_path,
         "teleop_servo_l_pose",
-        task="teleop",
         repo_id="local/teleop",
         include_ee_pose=True,
         dataset_cls=FakeLeRobotDataset,
     )
 
-    writer.start_episode()
+    writer.start_episode(task="teleop")
     writer.add_frame(
         {
             "timestamp": 1.0,
@@ -198,7 +191,29 @@ def test_lerobot_writer_rejects_macro_schema(tmp_path):
         LeRobotDatasetWriter(
             tmp_path,
             "auto_grasp",
-            task="grasp",
             repo_id="local/macro",
             dataset_cls=FakeLeRobotDataset,
         )
+
+
+def test_lerobot_writer_uses_each_episode_task_and_rejects_blank_tasks(tmp_path):
+    writer = LeRobotDatasetWriter(
+        tmp_path,
+        "qpos_gripper",
+        repo_id="local/multi-task",
+        dataset_cls=FakeLeRobotDataset,
+    )
+
+    writer.start_episode(task="pick-red-block")
+    writer.add_frame({"state": [0.0] * 7}, [0.0] * 7)
+    writer.close_episode()
+    writer.start_episode(task="place-blue-block")
+    writer.add_frame({"state": [1.0] * 7}, [1.0] * 7)
+    writer.close_episode()
+
+    assert [frame["task"] for frame in writer.dataset.frames] == [
+        "pick-red-block",
+        "place-blue-block",
+    ]
+    with pytest.raises(ValueError, match="task must be non-empty"):
+        writer.start_episode(task="   ")

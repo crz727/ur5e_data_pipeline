@@ -47,8 +47,22 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "clean_dialog_buttons->addWidget(clean_no)" in main_window
     assert 'QStringLiteral("Open Report")' in main_window
     assert "QDesktopServices::openUrl" in main_window
-    assert 'QStringLiteral("Export LeRobot")' in main_window
+    assert 'QStringLiteral("Language Instruction")' in main_window
+    assert 'QStringLiteral("English instruction")' in main_window
+    assert 'QStringLiteral("中文指令")' in main_window
+    assert 'QStringLiteral("Export ACT")' in main_window
+    assert 'QStringLiteral("Export VLA")' in main_window
+    assert 'QStringLiteral("Export LeRobot")' not in main_window
+    assert 'QStringLiteral("/api/capture/task-labels")' in main_window
+    assert 'QStringLiteral("/api/capture/export-lerobot/preflight")' in main_window
     assert 'QStringLiteral("/api/capture/export-lerobot")' in main_window
+    assert 'QStringLiteral("profile")' in main_window
+    assert 'path == QStringLiteral("/api/capture/start")' in main_window
+    assert 'QStringLiteral("Capture could not start: %1")' in main_window
+    assert "connect(dialog, &QFileDialog::rejected" in main_window
+    assert "show_temporary_capture_status" in main_window
+    assert "language_editor_request_in_progress_" in main_window
+    assert "if (capture_running_ || language_editor_request_in_progress_)" in main_window
     assert "QMessageBox" in main_window
     assert "#include <QDialog>" in main_window
     assert "auto * result_dialog = new QDialog(this);" in main_window
@@ -171,3 +185,29 @@ def test_panel_launch_wires_safe_replay_tf_without_hardware_control():
     assert '"robot_description": live_description' in launch_text
     assert '("joint_states", "/data_collection/robot_model/joint_states")' in launch_text
     assert "ur5e_driver" not in launch_text
+
+
+def test_export_status_transport_failures_keep_workflow_guard_and_retry():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
+        encoding="utf-8"
+    )
+    status_method = main_window.index("void MainWindow::request_lerobot_export_status()")
+    status_method_end = main_window.index(
+        "void MainWindow::request_replay_episodes()", status_method
+    )
+    status_source = main_window[status_method:status_method_end]
+    transient_start = main_window.index(
+        "if (!transport_ok || !document.isObject()) {", status_method
+    )
+    transient_end = main_window.index(
+        "const QString status = response.value", transient_start
+    )
+    transient_branch = main_window[transient_start:transient_end]
+
+    assert "lerobot_export_in_progress_ = false" not in transient_branch
+    assert "QTimer::singleShot(1000" in transient_branch
+    assert "request_lerobot_export_status" in transient_branch
+    assert 'QStringLiteral("invalid backend response")' in transient_branch
+    assert 'if (status == QStringLiteral("failed"))' in status_source
+    assert status_source.count("lerobot_export_in_progress_ = false") == 2
+    assert status_source.count("QTimer::singleShot(1000") == 2
