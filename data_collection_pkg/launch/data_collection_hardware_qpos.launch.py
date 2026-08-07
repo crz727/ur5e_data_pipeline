@@ -8,6 +8,9 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("root", default_value="datasets"),
         DeclareLaunchArgument("task", default_value="hardware_qpos"),
+        DeclareLaunchArgument("task_id", default_value=""),
+        DeclareLaunchArgument("language_instruction_en", default_value=""),
+        DeclareLaunchArgument("language_instruction_zh", default_value=""),
         DeclareLaunchArgument("dataset_stage", default_value="original"),
         DeclareLaunchArgument("runtime_mode", default_value="teleop"),
         DeclareLaunchArgument("sample_rate_hz", default_value="15.0"),
@@ -32,6 +35,9 @@ def generate_launch_description():
             parameters=[{
                 "root": LaunchConfiguration("root"),
                 "task": LaunchConfiguration("task"),
+                "task_id": LaunchConfiguration("task_id"),
+                "language_instruction_en": LaunchConfiguration("language_instruction_en"),
+                "language_instruction_zh": LaunchConfiguration("language_instruction_zh"),
                 "source": LaunchConfiguration("runtime_mode"),
                 "runtime_mode": LaunchConfiguration("runtime_mode"),
                 "dataset_stage": LaunchConfiguration("dataset_stage"),
