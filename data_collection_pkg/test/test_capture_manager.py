@@ -274,6 +274,72 @@ def test_capture_manager_exports_lerobot_in_background(tmp_path):
     assert converter_kwargs["video_codec"] == "h264"
 
 
+def test_capture_manager_forwards_normalized_vla_profile_and_rejects_invalid_profile(tmp_path):
+    converter_calls = []
+
+    def fake_converter(dataset_dir, **kwargs):
+        converter_calls.append((dataset_dir, kwargs))
+        return {"output_dir": str(kwargs["output_dir"]), "frame_count": 1}
+
+    manager = CaptureManager(root=tmp_path, converter=fake_converter)
+    result = manager.export_lerobot({
+        "cleaned_dataset_dir": str(tmp_path / "cleaned"),
+        "output_dir": str(tmp_path / "lerobot"),
+        "profile": " VLA ",
+    })
+    invalid_result = manager.export_lerobot({
+        "cleaned_dataset_dir": str(tmp_path / "cleaned"),
+        "output_dir": str(tmp_path / "lerobot"),
+        "profile": "unsupported",
+    })
+
+    assert result["ok"] is True
+    assert converter_calls == [(
+        tmp_path / "cleaned",
+        {
+            "output_dir": tmp_path / "lerobot",
+            "repo_id": None,
+            "fps": 15.0,
+            "cameras": ("external", "wrist"),
+            "visual_storage": "video",
+            "video_codec": "h264",
+            "profile": "vla",
+        },
+    )]
+    assert invalid_result == {"ok": False, "error": "profile must be act or vla"}
+
+
+def test_capture_manager_background_export_forwards_vla_profile(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+    converter_kwargs = {}
+
+    def fake_converter(_dataset_dir, **kwargs):
+        converter_kwargs.update(kwargs)
+        started.set()
+        assert release.wait(timeout=1.0)
+        return {"output_dir": str(kwargs["output_dir"]), "frame_count": 1}
+
+    manager = CaptureManager(root=tmp_path, converter=fake_converter)
+    result = manager.start_lerobot_export({
+        "cleaned_dataset_dir": str(tmp_path / "cleaned"),
+        "output_dir": str(tmp_path / "lerobot"),
+        "profile": "vla",
+    })
+
+    try:
+        assert result["ok"] is True
+        assert started.wait(timeout=1.0)
+        assert converter_kwargs["profile"] == "vla"
+    finally:
+        release.set()
+    for _ in range(100):
+        if manager.lerobot_export_status()["status"] == "done":
+            break
+        time.sleep(0.01)
+    assert manager.lerobot_export_status()["status"] == "done"
+
+
 def test_capture_manager_preflights_vla_export_without_creating_output(tmp_path):
     cleaned_dataset_dir = tmp_path / "cleaned" / "teleop" / "qpos_gripper"
     metadata_path = cleaned_dataset_dir / "meta" / "episodes.jsonl"

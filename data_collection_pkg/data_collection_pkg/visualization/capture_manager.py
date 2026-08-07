@@ -234,6 +234,9 @@ class CaptureManager:
                 raise ValueError("output_dir is required")
             cleaned_dataset_dir = Path(cleaned_value).expanduser()
             output_dir = Path(output_value).expanduser()
+            profile = str(payload.get("profile", "act")).strip().lower()
+            if profile not in {"act", "vla"}:
+                raise ValueError("profile must be act or vla")
             cameras = tuple(payload.get("cameras") or ("external", "wrist"))
             result = self.converter(
                 cleaned_dataset_dir,
@@ -243,6 +246,7 @@ class CaptureManager:
                 cameras=cameras,
                 visual_storage=str(payload.get("visual_storage", "video")),
                 video_codec=str(payload.get("video_codec", "h264")),
+                profile=profile,
             )
             return {"ok": True, **result}
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
