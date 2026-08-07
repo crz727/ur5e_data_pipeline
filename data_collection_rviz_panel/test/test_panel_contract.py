@@ -105,10 +105,9 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "replay_timeline_" in main_window
     assert "replay_timeline_dragging_" in main_window
     assert main_window.count("new QSlider(Qt::Horizontal") == 1
-    assert "mode_layout->addWidget(mode_buttons[index].first, 5 + index, 0, 1, 2);" in main_window
-    assert "mode_layout->setRowMinimumHeight(row, 20);" in main_window
-    assert "mode_layout->setRowMinimumHeight(row, 30);" in main_window
-    assert "mode_box->setMinimumHeight(300);" in main_window
+    assert "mode_status_layout->addRow" in main_window
+    assert "mode_box->setMinimumHeight(315);" in main_window
+    assert 'operation_column->setObjectName(QStringLiteral("operation_column"));' in main_window
     assert "robot_health_value_" in main_window
     assert "scene_camera_health_value_" in main_window
     assert "wrist_camera_health_value_" in main_window
@@ -116,7 +115,17 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "set_health_chip" in main_window
     assert 'QStringLiteral("Replay Timeline")' in main_window
     assert "replay_timeline_box" in main_window
+    assert "replay_timeline_box->setFixedHeight(72);" in main_window
+    assert "root_layout->setSpacing(10);" in main_window
     assert "root_layout->addWidget(replay_timeline_box);" in main_window
+    assert "auto * mode_status_layout = new QFormLayout(mode_status_frame);" in main_window
+    assert "auto * mode_buttons_layout = new QGridLayout(mode_actions_frame);" in main_window
+    assert "mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2, index % 2);" in main_window
+    assert 'mode_status_frame->setObjectName(QStringLiteral("mode_status_panel"));' in main_window
+    assert 'mode_status_frame->setStyleSheet(QStringLiteral("QFrame#mode_status_panel' in main_window
+    assert "right_sidebar->setFrameShape(QFrame::NoFrame);" in main_window
+    assert 'right_sidebar->setObjectName(QStringLiteral("operation_sidebar"));' in main_window
+    assert "right_sidebar->setStyleSheet" not in main_window
     assert "replace_history" in main_window
     assert "left_column = new QSplitter(Qt::Vertical, workspace)" in main_window
     assert "right_sidebar = new QScrollArea(workspace)" in main_window
@@ -132,6 +141,19 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "#include <QLockFile>" in main_cpp
     assert "QLockFile instance_lock" in main_cpp
     assert "instance_lock.tryLock" in main_cpp
+    assert "background:#0b0c10" in main_cpp
+    assert "QGroupBox" in main_cpp
+    assert "QSlider::groove:horizontal" in main_cpp
+    assert "#c8a44f" in main_cpp
+    assert "QFileDialog QTreeView" in main_cpp
+    assert "QFileDialog QListView" in main_cpp
+    assert "QFileDialog QWidget { background:#0d0e12; color:#f3eee2; }" in main_cpp
+    assert "QFileDialog QAbstractItemView::viewport" in main_cpp
+    assert "QScrollArea#operation_sidebar" in main_cpp
+    assert "#6f542b" in main_cpp
+    assert 'QColor("#131419")' in main_window
+    assert 'QColor("#f3eee2")' in main_window
+    assert 'QColor("#c8a44f")' in main_window
 
 
 def test_panel_launch_wires_safe_replay_tf_without_hardware_control():

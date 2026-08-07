@@ -17,6 +17,7 @@
 #include <QEvent>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -208,11 +209,11 @@ protected:
   void paintEvent(QPaintEvent *) override
   {
     QPainter painter(this);
-    painter.fillRect(rect(), QColor("#fbfcfe"));
-    painter.setPen(QColor("#26374a"));
+    painter.fillRect(rect(), QColor("#131419"));
+    painter.setPen(QColor("#f3eee2"));
     painter.drawText(10, 18, title_);
     if (samples_.empty()) {
-      painter.setPen(QColor("#657386"));
+      painter.setPen(QColor("#aaa49a"));
       painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("waiting for joint state"));
       return;
     }
@@ -240,17 +241,17 @@ protected:
     const QPair<double, double> range = shared_value_range(joint_count);
     const double minimum = range.first;
     const double maximum = range.second;
-    painter.setPen(QColor("#d6dde6"));
+    painter.setPen(QColor("#343038"));
     for (int tick = 0; tick < 3; ++tick) {
       const double ratio = static_cast<double>(tick) / 2.0;
       const int y = static_cast<int>(std::lround(plot.top() + ratio * plot.height()));
       const double value = maximum - ratio * (maximum - minimum);
       const QRect y_tick(2, y - 8, plot.left() - 6, 16);
       painter.drawLine(plot.left(), y, plot.right(), y);
-      painter.setPen(QColor("#657386"));
+      painter.setPen(QColor("#aaa49a"));
       painter.drawText(y_tick, Qt::AlignRight | Qt::AlignVCenter,
         QString::number(value, 'f', 3));
-      painter.setPen(QColor("#d6dde6"));
+      painter.setPen(QColor("#343038"));
     }
     for (int joint = 0; joint < joint_count; ++joint) {
       painter.setPen(QPen(colors[joint], 1.8));
@@ -270,7 +271,7 @@ protected:
 
     const double elapsed = displayed_duration();
     const QRect axis_rect(plot.left(), plot.bottom() + 2, plot.width(), kAxisHeight - 2);
-    painter.setPen(QColor("#657386"));
+    painter.setPen(QColor("#aaa49a"));
     painter.drawLine(plot.left(), plot.bottom(), plot.right(), plot.bottom());
     painter.drawText(axis_rect, Qt::AlignCenter, QStringLiteral("time (s)"));
     painter.drawText(axis_rect, Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("0.00"));
@@ -279,7 +280,7 @@ protected:
 
     if (hover_active_ && hovered_sample_index_ >= 0 && hovered_sample_index_ < samples_.size()) {
       const double cursor_x = sample_x(hovered_sample_index_, plot);
-      painter.setPen(QPen(QColor("#18212f"), 1.0, Qt::DashLine));
+      painter.setPen(QPen(QColor("#c8a44f"), 1.0, Qt::DashLine));
       painter.drawLine(QPointF(cursor_x, plot.top()), QPointF(cursor_x, plot.bottom()));
       draw_hover_overlay(painter, plot, joint_count, colors);
     }
@@ -312,8 +313,8 @@ private:
   const QVector<QColor> & curve_colors() const
   {
     static const QVector<QColor> colors = {
-      QColor("#2563eb"), QColor("#c2413a"), QColor("#1d8b5b"),
-      QColor("#7c3aed"), QColor("#d97706"), QColor("#0f8b8d")};
+      QColor("#c8a44f"), QColor("#d45264"), QColor("#f3eee2"),
+      QColor("#9c5f68"), QColor("#e4c778"), QColor("#7d5560")};
     return colors;
   }
 
@@ -451,9 +452,9 @@ private:
     const int info_y = std::clamp(plot.bottom() - info_height, 2, std::max(2, height() - info_height - 2));
     const QRect info_rect(info_x, info_y, info_width, info_height);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(255, 255, 255, 238));
+    painter.setBrush(QColor("#1a1b21"));
     painter.drawRoundedRect(info_rect, 4, 4);
-    painter.setPen(QColor("#18212f"));
+    painter.setPen(QColor("#f3eee2"));
     painter.drawText(info_rect.adjusted(6, 3, -6, -3), Qt::AlignTop | Qt::AlignLeft,
       QStringLiteral("t = %1 s").arg(sample.timestamp - samples_.front().timestamp, 0, 'f', 3));
     const QFontMetrics metrics(painter.font());
@@ -465,7 +466,7 @@ private:
         info_rect.width() - 12, 15);
       painter.setPen(colors[joint]);
       painter.drawLine(row.left(), row.center().y(), row.left() + 8, row.center().y());
-      painter.setPen(QColor("#26374a"));
+      painter.setPen(QColor("#f3eee2"));
       painter.drawText(row.adjusted(12, 0, -75, 0), Qt::AlignVCenter | Qt::AlignLeft,
         metrics.elidedText(name, Qt::ElideRight, row.width() - 95));
       painter.drawText(row, Qt::AlignVCenter | Qt::AlignRight,
@@ -502,10 +503,10 @@ QLabel * make_health_label()
 void set_health_chip(
   QLabel * label, const QString & name, bool healthy, bool stale, const QString & detail)
 {
-  const QString color = !healthy ? QStringLiteral("#b91c1c") :
-    (stale ? QStringLiteral("#b45309") : QStringLiteral("#047857"));
-  const QString background = !healthy ? QStringLiteral("#fef2f2") :
-    (stale ? QStringLiteral("#fffbeb") : QStringLiteral("#ecfdf5"));
+  const QString color = !healthy ? QStringLiteral("#e15b66") :
+    (stale ? QStringLiteral("#e4c778") : QStringLiteral("#74c79b"));
+  const QString background = !healthy ? QStringLiteral("#2a151b") :
+    (stale ? QStringLiteral("#2a2417") : QStringLiteral("#132219"));
   label->setText(QStringLiteral("%1: %2").arg(name, detail));
   label->setStyleSheet(QStringLiteral(
     "border:1px solid %1; border-radius:8px; padding:4px 7px; color:%1; background:%2;")
@@ -580,12 +581,14 @@ void MainWindow::build_ui()
   connect(windowed_action, &QAction::triggered, this, [this]() { showNormal(); });
 
   auto * root = new QWidget(this);
+  root->setObjectName(QStringLiteral("console_root"));
   auto * root_layout = new QVBoxLayout(root);
   root_layout->setContentsMargins(10, 10, 10, 10);
+  root_layout->setSpacing(10);
 
   auto * header = new QHBoxLayout;
   auto * title = new QLabel(QStringLiteral("UR5e Data Collection Console"));
-  title->setStyleSheet(QStringLiteral("font-size: 22px; font-weight: bold;"));
+  title->setStyleSheet(QStringLiteral("font-size:22px; font-weight:bold; color:#e4c778;"));
   connection_label_ = make_value_label(QStringLiteral("connecting to dashboard backend"));
   header->addWidget(title);
   header->addStretch();
@@ -618,13 +621,16 @@ void MainWindow::build_ui()
   for (QLabel * label : {external_camera_label_, wrist_camera_label_}) {
     label->setAlignment(Qt::AlignCenter);
     label->setMinimumSize(220, 140);
-    label->setStyleSheet(QStringLiteral("background:#111827; color:#dce6f2;"));
+    label->setStyleSheet(QStringLiteral("background:#161014; color:#f3eee2; border:1px solid #44392f;"));
     camera_layout->addWidget(label);
   }
   visual_layout->addWidget(camera_box, 3);
 
   auto * operation_column = new QWidget(root);
+  operation_column->setObjectName(QStringLiteral("operation_column"));
   auto * operation_layout = new QVBoxLayout(operation_column);
+  operation_layout->setContentsMargins(0, 0, 0, 0);
+  operation_layout->setSpacing(8);
   auto * telemetry_box = new QGroupBox(QStringLiteral("Realtime Telemetry"), operation_column);
   auto * telemetry_layout = new QVBoxLayout(telemetry_box);
   qpos_chart_ = new TelemetryChart(QStringLiteral("Joint Position (qpos)"), telemetry_box);
@@ -635,7 +641,15 @@ void MainWindow::build_ui()
   telemetry_layout->addWidget(effort_chart_);
   operation_layout->addWidget(telemetry_box);
   auto * mode_box = new QGroupBox(QStringLiteral("Mode Manager"), operation_column);
-  auto * mode_layout = new QGridLayout(mode_box);
+  auto * mode_layout = new QVBoxLayout(mode_box);
+  auto * mode_status_frame = new QFrame(mode_box);
+  mode_status_frame->setObjectName(QStringLiteral("mode_status_panel"));
+  mode_status_frame->setStyleSheet(QStringLiteral("QFrame#mode_status_panel { border:1px solid #6f542b; border-radius:3px; background:#0d0e12; }"));
+  auto * mode_status_layout = new QFormLayout(mode_status_frame);
+  mode_status_layout->setContentsMargins(8, 7, 8, 7);
+  mode_status_layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  mode_status_layout->setHorizontalSpacing(16);
+  mode_status_layout->setVerticalSpacing(4);
   mode_value_ = make_value_label();
   mode_state_value_ = make_value_label();
   mode_owner_value_ = make_value_label();
@@ -646,12 +660,9 @@ void MainWindow::build_ui()
     {QStringLiteral("Owner"), mode_owner_value_}, {QStringLiteral("Step"), mode_step_value_},
     {QStringLiteral("Fault"), mode_fault_value_}};
   for (int index = 0; index < mode_rows.size(); ++index) {
-    mode_layout->addWidget(new QLabel(mode_rows[index].first), index, 0);
-    mode_layout->addWidget(mode_rows[index].second, index, 1);
+    mode_status_layout->addRow(new QLabel(mode_rows[index].first), mode_rows[index].second);
   }
-  for (int row = 0; row < 5; ++row) {
-    mode_layout->setRowMinimumHeight(row, 20);
-  }
+  mode_layout->addWidget(mode_status_frame);
   idle_button_ = new QPushButton(QStringLiteral("IDLE"));
   auto_button_ = new QPushButton(QStringLiteral("AUTO"));
   api_button_ = new QPushButton(QStringLiteral("API"));
@@ -659,15 +670,23 @@ void MainWindow::build_ui()
   const QList<QPair<QPushButton *, QString>> mode_buttons = {
     {idle_button_, QStringLiteral("idle")}, {auto_button_, QStringLiteral("auto")},
     {api_button_, QStringLiteral("api")}, {teleop_button_, QStringLiteral("teleop")}};
+  auto * mode_actions_frame = new QFrame(mode_box);
+  mode_actions_frame->setObjectName(QStringLiteral("mode_actions_panel"));
+  mode_actions_frame->setStyleSheet(QStringLiteral("QFrame#mode_actions_panel { border:1px solid #6f542b; border-radius:3px; background:#111216; }"));
+  auto * mode_buttons_layout = new QGridLayout(mode_actions_frame);
+  mode_buttons_layout->setContentsMargins(8, 8, 8, 8);
+  mode_buttons_layout->setHorizontalSpacing(8);
+  mode_buttons_layout->setVerticalSpacing(8);
+  mode_buttons_layout->setColumnStretch(0, 1);
+  mode_buttons_layout->setColumnStretch(1, 1);
   for (int index = 0; index < mode_buttons.size(); ++index) {
-    mode_layout->addWidget(mode_buttons[index].first, 5 + index, 0, 1, 2);
+    mode_buttons[index].first->setMinimumHeight(36);
+    mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2, index % 2);
     connect(mode_buttons[index].first, &QPushButton::clicked, this,
       [this, mode = mode_buttons[index].second]() { request_mode(mode); });
   }
-  for (int row = 5; row < 9; ++row) {
-    mode_layout->setRowMinimumHeight(row, 30);
-  }
-  mode_box->setMinimumHeight(300);
+  mode_layout->addWidget(mode_actions_frame);
+  mode_box->setMinimumHeight(315);
   operation_layout->addWidget(mode_box);
 
   auto * capture_box = new QGroupBox(QStringLiteral("Capture"), operation_column);
@@ -831,9 +850,12 @@ void MainWindow::build_ui()
   auto * workspace = new QSplitter(Qt::Horizontal, root);
   auto * left_column = new QSplitter(Qt::Vertical, workspace);
   auto * right_sidebar = new QScrollArea(workspace);
+  right_sidebar->setObjectName(QStringLiteral("operation_sidebar"));
+  right_sidebar->setFrameShape(QFrame::NoFrame);
   right_sidebar->setWidgetResizable(true);
   right_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   right_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+  right_sidebar->viewport()->setObjectName(QStringLiteral("operation_sidebar_viewport"));
   right_sidebar->setWidget(operation_column);
   left_column->addWidget(visual_column);
   left_column->addWidget(tabs);
@@ -846,7 +868,7 @@ void MainWindow::build_ui()
   workspace->setStretchFactor(0, 12);
   workspace->setStretchFactor(1, 8);
   auto * replay_timeline_box = new QGroupBox(QStringLiteral("Replay Timeline"), root);
-  replay_timeline_box->setMinimumHeight(60);
+  replay_timeline_box->setFixedHeight(72);
   auto * replay_timeline_layout = new QHBoxLayout(replay_timeline_box);
   replay_timeline_layout->addWidget(new QLabel(QStringLiteral("Progress"), replay_timeline_box));
   replay_timeline_layout->addWidget(replay_timeline_, 1);
@@ -1108,7 +1130,7 @@ void MainWindow::update_capture_toggle()
   capture_toggle_button_->setText(capture_running_ ?
     QStringLiteral("Stop Capture") : QStringLiteral("Start Capture"));
   capture_toggle_button_->setStyleSheet(capture_running_ ?
-    QStringLiteral("color:#c2413a; border-color:#efaaa5; background:#fff7f6;") : QString());
+    QStringLiteral("color:#fff4df; border-color:#e4c778; background:#9c2a40;") : QString());
   if (clean_dataset_button_ != nullptr) {
     clean_dataset_button_->setEnabled(
       !capture_running_ && !capture_dataset_path_.isEmpty() && !cleaning_in_progress_);
