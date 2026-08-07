@@ -163,3 +163,22 @@ def test_panel_launch_wires_safe_replay_tf_without_hardware_control():
     assert '"robot_description": live_description' in launch_text
     assert '("joint_states", "/data_collection/robot_model/joint_states")' in launch_text
     assert "ur5e_driver" not in launch_text
+
+
+def test_export_status_transport_failures_keep_workflow_guard_and_retry():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
+        encoding="utf-8"
+    )
+    status_method = main_window.index("void MainWindow::request_lerobot_export_status()")
+    transient_start = main_window.index(
+        "if (!transport_ok || !document.isObject()) {", status_method
+    )
+    transient_end = main_window.index(
+        "const QString status = response.value", transient_start
+    )
+    transient_branch = main_window[transient_start:transient_end]
+
+    assert "lerobot_export_in_progress_ = false" not in transient_branch
+    assert "QTimer::singleShot(1000" in transient_branch
+    assert "request_lerobot_export_status" in transient_branch
+    assert 'QStringLiteral("invalid backend response")' in transient_branch

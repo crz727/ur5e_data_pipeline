@@ -1529,9 +1529,11 @@ void MainWindow::request_lerobot_export_status()
     const QJsonDocument document = QJsonDocument::fromJson(body);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject()) {
-      lerobot_export_in_progress_ = false;
+      const QString status_error = transport_ok ?
+        QStringLiteral("invalid backend response") : transport_error;
       show_temporary_capture_status(QStringLiteral("%1 export status unavailable: %2").arg(
-        profile_label, transport_error));
+        profile_label, status_error));
+      QTimer::singleShot(1000, this, &MainWindow::request_lerobot_export_status);
       return;
     }
     const QString status = response.value(QStringLiteral("status")).toString();
