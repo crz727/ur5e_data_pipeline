@@ -5,6 +5,7 @@ from data_collection_pkg.visualization.web_dashboard import (
     DashboardStateStore,
     create_dashboard_app,
 )
+from data_collection_pkg.visualization.capture_manager import CaptureManager
 
 
 def test_dashboard_state_store_updates_from_ros_json_topics():
@@ -279,3 +280,45 @@ def test_dashboard_preflight_and_task_labels_require_capture_controls():
     assert labels.get_json()["error"] == "capture controls disabled"
     assert preflight.status_code == 409
     assert preflight.get_json()["error"] == "capture controls disabled"
+
+
+def test_dashboard_preflight_rejects_non_object_json_payloads():
+    class Manager:
+        def preflight_lerobot_export(self, _payload):
+            return {"ok": True, "profile": "act"}
+
+    app = create_dashboard_app(DashboardStateStore(), capture_manager=Manager())
+    client = app.test_client()
+
+    string_payload = client.post("/api/capture/export-lerobot/preflight", json="invalid")
+    list_payload = client.post("/api/capture/export-lerobot/preflight", json=["invalid"])
+
+    for response in (string_payload, list_payload):
+        assert response.status_code == 409
+        assert response.get_json()["ok"] is False
+        assert response.get_json()["error"] == "preflight payload must be a JSON object"
+
+
+def test_dashboard_preflight_rejects_null_or_non_string_output_dir(tmp_path):
+    manager = CaptureManager(root=tmp_path)
+    app = create_dashboard_app(DashboardStateStore(), capture_manager=manager)
+    client = app.test_client()
+    payload = {
+        "cleaned_dataset_dir": str(tmp_path / "cleaned" / "teleop" / "qpos_gripper"),
+        "profile": "vla",
+    }
+
+    null_output = client.post(
+        "/api/capture/export-lerobot/preflight",
+        json={**payload, "output_dir": None},
+    )
+    numeric_output = client.post(
+        "/api/capture/export-lerobot/preflight",
+        json={**payload, "output_dir": 17},
+    )
+
+    for response in (null_output, numeric_output):
+        assert response.status_code == 409
+        assert response.get_json()["ok"] is False
+        assert response.get_json()["error"] == "output_dir must be a non-empty string"
+    assert manager._export_thread is None

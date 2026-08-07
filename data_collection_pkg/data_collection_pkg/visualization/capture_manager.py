@@ -252,17 +252,21 @@ class CaptureManager:
         """Report LeRobot export eligibility without writing an output dataset."""
         if self._is_running():
             return {"ok": False, "error": "stop capture before exporting LeRobot"}
+        if not isinstance(payload, Mapping):
+            return {"ok": False, "error": "preflight payload must be a JSON object"}
         try:
-            cleaned_value = str(payload.get("cleaned_dataset_dir", "")).strip()
-            output_value = str(payload.get("output_dir", "")).strip()
-            profile = str(payload.get("profile", "act")).strip()
-            if not cleaned_value:
-                raise ValueError("cleaned_dataset_dir is required")
-            if not output_value:
-                raise ValueError("output_dir is required")
-            cleaned_dataset_dir = Path(cleaned_value).expanduser()
-            output_dir = Path(output_value).expanduser()
-            result = preflight_jsonl_to_lerobot(cleaned_dataset_dir, profile)
+            cleaned_value = payload.get("cleaned_dataset_dir", "")
+            output_value = payload.get("output_dir", "")
+            profile = payload.get("profile", "act")
+            if not isinstance(cleaned_value, str) or not cleaned_value.strip():
+                raise ValueError("cleaned_dataset_dir must be a non-empty string")
+            if not isinstance(output_value, str) or not output_value.strip():
+                raise ValueError("output_dir must be a non-empty string")
+            if not isinstance(profile, str) or not profile.strip():
+                raise ValueError("profile must be a non-empty string")
+            cleaned_dataset_dir = Path(cleaned_value.strip()).expanduser()
+            output_dir = Path(output_value.strip()).expanduser()
+            result = preflight_jsonl_to_lerobot(cleaned_dataset_dir, profile.strip())
             if result["profile"] == "vla":
                 result["planned_report_path"] = str(
                     output_dir / "meta" / "vla_export_report.json"

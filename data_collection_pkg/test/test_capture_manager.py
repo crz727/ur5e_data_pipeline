@@ -306,8 +306,8 @@ def test_capture_manager_preflights_vla_export_without_creating_output(tmp_path)
     manager = CaptureManager(root=tmp_path)
 
     result = manager.preflight_lerobot_export({
-        "cleaned_dataset_dir": str(cleaned_dataset_dir),
-        "output_dir": str(output_dir),
+        "cleaned_dataset_dir": f"  {cleaned_dataset_dir}  ",
+        "output_dir": f"  {output_dir}  ",
         "profile": "vla",
     })
 
