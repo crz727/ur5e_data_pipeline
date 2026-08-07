@@ -31,7 +31,7 @@ def _observation(timestamp, *, qpos=None, gripper=0.4):
     }
 
 
-def _write_original_dataset(tmp_path, annotations):
+def _write_original_dataset(tmp_path, annotations, *, episode_metadata=None):
     writer = JsonlDatasetWriter(
         tmp_path,
         "qpos_gripper",
@@ -39,6 +39,7 @@ def _write_original_dataset(tmp_path, annotations):
         source="teleop",
         runtime_mode="teleop",
         dataset_stage="original",
+        episode_metadata=episode_metadata,
     )
     for episode_index in range(4):
         writer.start_episode()
@@ -112,6 +113,28 @@ def test_cleaner_copies_only_successful_quality_approved_episode(tmp_path):
     assert not (cleaned / "data" / "episode_000001.jsonl").exists()
     assert source.is_dir()
     assert (source / "data" / "episode_000003.jsonl").is_file()
+
+
+def test_cleaner_retains_episode_language_annotation_fields_unchanged(tmp_path):
+    annotation = {
+        "task_name": "pick_place_batch_0807",
+        "task_id": "pick-red-block-to-blue-tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+        "annotation_source": "capture_ui",
+    }
+    source = _write_original_dataset(
+        tmp_path,
+        {0: "success", 1: "failure", 3: "failure"},
+        episode_metadata=annotation,
+    )
+
+    result = clean_original_dataset(source)
+
+    cleaned_episode = _read_jsonl(
+        Path(result["cleaned_dataset_dir"]) / "meta" / "episodes.jsonl"
+    )[0]
+    assert {key: cleaned_episode[key] for key in annotation} == annotation
 
 
 def test_cleaner_manifest_and_report_explain_every_non_accepted_episode(tmp_path):
