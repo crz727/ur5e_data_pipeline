@@ -38,6 +38,13 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "capture_toggle_button_" in main_window
     assert 'QStringLiteral("Start Capture")' in main_window
     assert 'QStringLiteral("Stop Capture")' in main_window
+    capture_selector = main_window[main_window.index("capture_mode_->addItems"):
+                                   main_window.index("capture_task_", main_window.index("capture_mode_->addItems"))]
+    assert 'QStringLiteral("teleop")' in capture_selector
+    assert 'QStringLiteral("http")' in capture_selector
+    assert 'QStringLiteral("act")' in capture_selector
+    assert 'QStringLiteral("vla")' in capture_selector
+    assert 'QStringLiteral("policy")' not in capture_selector
     assert 'QStringLiteral("/api/capture/annotate")' in main_window
     assert "clean_dataset_button_" in main_window
     assert 'QStringLiteral("Clean Data")' in main_window

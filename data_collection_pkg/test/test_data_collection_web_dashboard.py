@@ -140,6 +140,15 @@ def test_dashboard_flask_app_serves_index_and_state_api():
     assert state.get_json()["quality_status"]["frame_count"] == 12
 
 
+def test_dashboard_capture_selector_exposes_capture_profiles_only():
+    app = create_dashboard_app(DashboardStateStore())
+    index = app.test_client().get("/").data
+
+    for value in ("teleop", "http", "act", "vla"):
+        assert f'<option value="{value}">{value}</option>'.encode() in index
+    assert b'<option value="policy">policy</option>' not in index
+
+
 def test_dashboard_replay_seek_api_rejects_idle_replay():
     app = create_dashboard_app(DashboardStateStore())
     client = app.test_client()
