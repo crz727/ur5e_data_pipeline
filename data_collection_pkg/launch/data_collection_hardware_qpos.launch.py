@@ -23,7 +23,7 @@ def generate_launch_description():
         DeclareLaunchArgument("end_effector_pose_topic", default_value="/tool0/pose"),
         DeclareLaunchArgument("required_cameras", default_value="external,wrist"),
         DeclareLaunchArgument("max_sync_delta_s", default_value="0.07"),
-        DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.03"),
+        DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.07"),
         DeclareLaunchArgument("image_storage_format", default_value="jpeg"),
         DeclareLaunchArgument("jpeg_quality", default_value="75"),
         DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Float64MultiArray"),

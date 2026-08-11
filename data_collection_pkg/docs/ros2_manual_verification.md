@@ -71,7 +71,7 @@ ros2 run data_collection_pkg data_collection quality-check \
   --profile trainable \
   --required-camera external \
   --required-camera wrist \
-  --max-sync-delta-s 0.05 \
+  --max-sync-delta-s 0.07 \
   --target-fps 10.0 \
   --fps-tolerance-ratio 0.2 \
   --min-frame-count 20 \
