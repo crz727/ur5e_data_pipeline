@@ -97,8 +97,8 @@ ros2 launch data_collection_pkg data_collection_teleop_ur_ros2.launch.py \
   gripper_state_topic:=/gripper/state
 ```
 
-Start original hardware qpos recording. This is the recommended path for
-policy, teleop, and HTTP-controlled demonstrations:
+Start original hardware qpos recording. This is the recommended fixed-rate
+path for teleop, HTTP, ACT, and VLA capture profiles:
 
 ```bash
 ros2 launch data_collection_pkg data_collection_hardware_qpos.launch.py \
@@ -110,13 +110,21 @@ ros2 launch data_collection_pkg data_collection_hardware_qpos.launch.py \
   gripper_state_topic:=/gripper/state
 ```
 
-Use `runtime_mode:=policy`, `runtime_mode:=teleop`, or `runtime_mode:=http` to
-separate control modes. This fixed-rate mode writes
-`original/<runtime_mode>/qpos_gripper` frames. Each
-frame uses the current hardware observation as `observation` and the next
-sampled joint/gripper state as `action`, so the action space matches ACT-style
-`[q1, q2, q3, q4, q5, q6, gripper]` policies. Bridge or HTTP action events are
-not required for this path.
+Use `runtime_mode:=teleop`, `runtime_mode:=http`, `runtime_mode:=act`, or
+`runtime_mode:=vla` to classify captures. These values are capture profiles,
+not robot control modes: every profile writes fixed-rate frames to
+`original/<runtime_mode>/qpos_gripper`, and control ownership remains with the
+independent Mode Manager. Each frame uses the current hardware observation as
+`observation` and the next sampled joint/gripper state as `action`, so the
+action space matches ACT-style `[q1, q2, q3, q4, q5, q6, gripper]` policies.
+Bridge or HTTP action events are not required for this path. Existing
+`original/policy/qpos_gripper` datasets remain readable for historical replay
+and export, but new capture requests should use `act` or `vla`.
+
+Task and language annotations are optional at collector startup. The dashboard
+omits empty `task_id`, English, and Chinese launch arguments so a no-language
+capture starts normally. VLA export preflight still requires a valid English
+instruction for an episode to be included in a VLA dataset.
 
 Run trainable dataset quality checks:
 
@@ -126,7 +134,7 @@ ros2 run data_collection_pkg data_collection quality-check \
   --profile trainable \
   --required-camera external \
   --required-camera wrist \
-  --max-sync-delta-s 0.05 \
+  --max-sync-delta-s 0.07 \
   --target-fps 15.0 \
   --min-frame-count 20 \
   --min-duration-s 2.0 \
