@@ -265,6 +265,8 @@ class FixedRateQposDemoEngine:
         raw_command_topic: str = TELEOP_TOPICS["servo_l_command"],
         tolerance_s: float = 0.05,
         topic_tolerances=None,
+        camera_settle_delay_s: float = 0.07,
+        sample_rate_hz: float = None,
         status_callback=None,
         drop_callback=None,
     ) -> None:
@@ -278,12 +280,18 @@ class FixedRateQposDemoEngine:
         )
         self.status_callback = status_callback
         self.drop_callback = drop_callback
+        self.camera_settle_delay_s = max(0.0, float(camera_settle_delay_s))
+        self.sample_rate_hz = None if sample_rate_hz is None else float(sample_rate_hz)
+        if self.sample_rate_hz is not None and self.sample_rate_hz <= 0.0:
+            raise ValueError("sample_rate_hz must be positive")
         self.accepted_frames = 0
         self.dropped_frames = 0
         self.last_status = "idle"
         self._pending_observation = None
         self._synchronized_once = False
         self._warmup_reasons = []
+        self._pending_camera_anchors = []
+        self.camera_anchor_timestamps = []
 
     def add_sample(self, sample: Sample) -> None:
         """Store one topic sample for future fixed-rate ticks."""
@@ -323,6 +331,35 @@ class FixedRateQposDemoEngine:
             self._emit_drop(timestamp, built.drop_reasons)
         self._emit_status()
         return built
+
+    def capture_camera_anchor(self, timestamp: float, *, now: float) -> bool:
+        """Queue a scene-camera header timestamp for delayed synchronization."""
+        anchor = float(timestamp)
+        if self.camera_anchor_timestamps and anchor - self.camera_anchor_timestamps[-1] < self._sample_period_s():
+            return False
+        self.camera_anchor_timestamps.append(anchor)
+        self._pending_camera_anchors.append(anchor)
+        return True
+
+    def flush_camera_anchors(self, *, now: float) -> list:
+        """Synchronize scene-camera anchors after peer messages have arrived."""
+        ready = []
+        while self._pending_camera_anchors:
+            anchor = self._pending_camera_anchors[0]
+            if float(now) - anchor < self.camera_settle_delay_s:
+                break
+            self._pending_camera_anchors.pop(0)
+            result = self.capture_at(anchor)
+            if result is not None and not isinstance(result, SyncedFrame):
+                ready.append(result)
+        return ready
+
+    def _sample_period_s(self) -> float:
+        if self.sample_rate_hz is None:
+            return 0.0
+        # Camera clocks have small normal frame-period jitter; avoid turning a
+        # 30 ms frame from a nominal 30 Hz source into a skipped observation.
+        return 0.9 / self.sample_rate_hz
 
     def _emit_status(self) -> None:
         if self.status_callback is None:

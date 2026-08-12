@@ -148,6 +148,81 @@ def test_fixed_rate_qpos_demo_uses_next_state_as_action(tmp_path):
     assert frame["metadata"]["dataset_stage"] == "original"
 
 
+def test_camera_anchor_waits_for_settlement_and_uses_next_anchor_as_action(tmp_path):
+    recorder = QposDemoJsonlRecorder(tmp_path, task="pick")
+    engine = FixedRateQposDemoEngine(
+        recorder=recorder,
+        required_topics=(TELEOP_TOPICS["joint_states"], TELEOP_TOPICS["gripper_state"]),
+        optional_topics=(TELEOP_TOPICS["external_camera"], TELEOP_TOPICS["wrist_camera"]),
+        tolerance_s=0.02,
+        topic_tolerances={TELEOP_TOPICS["gripper_state"]: 0.03},
+        camera_settle_delay_s=0.07,
+        sample_rate_hz=30.0,
+    )
+
+    for timestamp, position, gripper in ((10.0, 0.0, 0.0), (10.04, 0.4, 1.0)):
+        engine.add_sample(_joint_sample(timestamp, [position] * 6))
+        engine.add_sample(_gripper_sample(timestamp, gripper))
+        engine.add_sample(Sample(TELEOP_TOPICS["external_camera"], timestamp, {"data": b"scene"}))
+        engine.add_sample(Sample(TELEOP_TOPICS["wrist_camera"], timestamp + 0.01, {"data": b"wrist"}))
+        engine.capture_camera_anchor(timestamp, now=timestamp + 0.035)
+
+    assert engine.flush_camera_anchors(now=10.069) == []
+
+    built = engine.flush_camera_anchors(now=10.11)
+
+    assert len(built) == 1
+    assert built[0].ok is True
+    assert built[0].observation["timestamp"] == 10.0
+    assert built[0].action == [0.4] * 6 + [1.0]
+
+
+def test_camera_anchor_downsamples_deterministically_by_header_timestamp(tmp_path):
+    recorder = QposDemoJsonlRecorder(tmp_path, task="pick")
+    engine = FixedRateQposDemoEngine(
+        recorder=recorder,
+        required_topics=(TELEOP_TOPICS["joint_states"], TELEOP_TOPICS["gripper_state"]),
+        camera_settle_delay_s=0.0,
+        sample_rate_hz=15.0,
+    )
+    for timestamp in (1.0, 1.033, 1.067, 1.1):
+        engine.add_sample(_joint_sample(timestamp, [timestamp] * 6))
+        engine.add_sample(_gripper_sample(timestamp, 0.0))
+        engine.capture_camera_anchor(timestamp, now=timestamp)
+
+    engine.flush_camera_anchors(now=1.1)
+
+    assert engine.camera_anchor_timestamps == [1.0, 1.067]
+
+
+def test_camera_anchor_accepts_nominal_29_97_hz_source_for_30_hz_target(tmp_path):
+    recorder = QposDemoJsonlRecorder(tmp_path, task="pick")
+    engine = FixedRateQposDemoEngine(
+        recorder=recorder,
+        required_topics=(TELEOP_TOPICS["joint_states"], TELEOP_TOPICS["gripper_state"]),
+        sample_rate_hz=30.0,
+    )
+
+    for timestamp in (1.0, 1.0333667, 1.0667334):
+        engine.capture_camera_anchor(timestamp, now=timestamp)
+
+    assert engine.camera_anchor_timestamps == [1.0, 1.0333667, 1.0667334]
+
+
+def test_camera_anchor_accepts_30_ms_camera_jitter_for_30_hz_target(tmp_path):
+    recorder = QposDemoJsonlRecorder(tmp_path, task="pick")
+    engine = FixedRateQposDemoEngine(
+        recorder=recorder,
+        required_topics=(TELEOP_TOPICS["joint_states"], TELEOP_TOPICS["gripper_state"]),
+        sample_rate_hz=30.0,
+    )
+
+    for timestamp in (1.0, 1.03, 1.063):
+        engine.capture_camera_anchor(timestamp, now=timestamp)
+
+    assert engine.camera_anchor_timestamps == [1.0, 1.03, 1.063]
+
+
 def test_fixed_rate_qpos_demo_does_not_count_pre_sync_warmup_as_dropped(tmp_path):
     statuses = []
     drops = []

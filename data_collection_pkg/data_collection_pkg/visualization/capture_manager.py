@@ -404,6 +404,7 @@ class CaptureManager:
             f"dataset_stage:={dataset_stage}",
             f"runtime_mode:={runtime_mode}",
             f"sample_rate_hz:={payload.get('sample_rate_hz', 15.0)}",
+            f"sampling_clock:={payload.get('sampling_clock', 'timer')}",
             f"gripper_state_topic:={payload.get('gripper_state_topic', '/binary_gripper_state')}",
             f"gripper_state_msg_type:={payload.get('gripper_state_msg_type', 'std_msgs.msg:Int8')}",
             f"external_camera_topic:={payload.get('external_camera_topic', '/camera2/scene_camera/color/image_raw/compressed')}",
@@ -414,6 +415,10 @@ class CaptureManager:
             f"required_cameras:={payload.get('required_cameras', 'external,wrist')}",
             f"max_sync_delta_s:={payload.get('max_sync_delta_s', 0.07)}",
             f"state_max_sync_delta_s:={payload.get('state_max_sync_delta_s', 0.07)}",
+            f"camera_sync_tolerance_s:={payload.get('camera_sync_tolerance_s', 0.02)}",
+            f"gripper_sync_tolerance_s:={payload.get('gripper_sync_tolerance_s', 0.03)}",
+            f"scene_camera_settle_delay_s:={payload.get('scene_camera_settle_delay_s', 0.07)}",
+            f"camera_receive_delay_health_threshold_s:={payload.get('camera_receive_delay_health_threshold_s', 0.05)}",
             f"image_storage_format:={payload.get('image_storage_format', 'jpeg')}",
             f"jpeg_quality:={payload.get('jpeg_quality', 75)}",
         ]
