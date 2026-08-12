@@ -404,7 +404,7 @@ class CaptureManager:
             f"dataset_stage:={dataset_stage}",
             f"runtime_mode:={runtime_mode}",
             f"sample_rate_hz:={payload.get('sample_rate_hz', 15.0)}",
-            f"sampling_clock:={payload.get('sampling_clock', 'timer')}",
+            f"sampling_clock:={payload.get('sampling_clock', 'scene_camera_header')}",
             f"gripper_state_topic:={payload.get('gripper_state_topic', '/binary_gripper_state')}",
             f"gripper_state_msg_type:={payload.get('gripper_state_msg_type', 'std_msgs.msg:Int8')}",
             f"external_camera_topic:={payload.get('external_camera_topic', '/camera2/scene_camera/color/image_raw/compressed')}",

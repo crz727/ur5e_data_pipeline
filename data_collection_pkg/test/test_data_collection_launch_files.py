@@ -68,7 +68,7 @@ def test_hardware_qpos_collection_launch_is_packaged_and_fixed_rate():
     assert 'DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Int8")' in launch_text
     assert 'DeclareLaunchArgument("max_sync_delta_s", default_value="0.07")' in launch_text
     assert 'DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.07")' in launch_text
-    assert 'DeclareLaunchArgument("sampling_clock", default_value="timer")' in launch_text
+    assert 'DeclareLaunchArgument("sampling_clock", default_value="scene_camera_header")' in launch_text
     assert 'DeclareLaunchArgument("camera_sync_tolerance_s", default_value="0.02")' in launch_text
     assert 'DeclareLaunchArgument("gripper_sync_tolerance_s", default_value="0.03")' in launch_text
     assert 'DeclareLaunchArgument("scene_camera_settle_delay_s", default_value="0.07")' in launch_text
@@ -89,7 +89,7 @@ def test_hardware_qpos_launch_defaults_are_binary_gripper_topic(monkeypatch):
 
     assert declared["gripper_state_topic"] == "/binary_gripper_state"
     assert declared["gripper_state_msg_type"] == "std_msgs.msg:Int8"
-    assert declared["sampling_clock"] == "timer"
+    assert declared["sampling_clock"] == "scene_camera_header"
 
 
 def test_hardware_qpos_launch_declares_and_forwards_task_language_parameters(monkeypatch):
