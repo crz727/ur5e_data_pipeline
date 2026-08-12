@@ -14,7 +14,7 @@ def generate_launch_description():
         DeclareLaunchArgument("dataset_stage", default_value="original"),
         DeclareLaunchArgument("runtime_mode", default_value="teleop"),
         DeclareLaunchArgument("sample_rate_hz", default_value="15.0"),
-        DeclareLaunchArgument("gripper_state_topic", default_value="/gripper/state"),
+        DeclareLaunchArgument("gripper_state_topic", default_value="/binary_gripper_state"),
         DeclareLaunchArgument("external_camera_topic", default_value="/camera2/scene_camera/color/image_raw/compressed"),
         DeclareLaunchArgument("wrist_camera_topic", default_value="/camera1/wrist_camera/color/image_raw/compressed"),
         DeclareLaunchArgument("external_camera_msg_type", default_value="sensor_msgs.msg:CompressedImage"),
@@ -26,7 +26,7 @@ def generate_launch_description():
         DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.07"),
         DeclareLaunchArgument("image_storage_format", default_value="jpeg"),
         DeclareLaunchArgument("jpeg_quality", default_value="75"),
-        DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Float64MultiArray"),
+        DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Int8"),
         Node(
             package="data_collection_pkg",
             executable="data_collection_collector_node",
