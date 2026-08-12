@@ -745,7 +745,12 @@ void MainWindow::build_ui()
       {QStringLiteral("task"), capture_task_->text()},
       {QStringLiteral("task_id"), capture_task_id_},
       {QStringLiteral("language_instruction_en"), capture_language_instruction_en_},
-      {QStringLiteral("language_instruction_zh"), capture_language_instruction_zh_}});
+      {QStringLiteral("language_instruction_zh"), capture_language_instruction_zh_},
+      {QStringLiteral("sample_rate_hz"), 30.0},
+      {QStringLiteral("sampling_clock"), QStringLiteral("scene_camera_header")},
+      {QStringLiteral("camera_sync_tolerance_s"), 0.02},
+      {QStringLiteral("joint_state_sync_tolerance_s"), 0.02},
+      {QStringLiteral("gripper_sync_tolerance_s"), 0.03}});
   });
   connect(clean_dataset_button_, &QPushButton::clicked, this, [this]() {
     if (capture_running_ || capture_dataset_path_.isEmpty()) {
@@ -1329,7 +1334,12 @@ void MainWindow::request_dataset_cleaning()
   capture_status_value_->setText(QStringLiteral("Cleaning original dataset..."));
   QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/clean")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-  const QJsonObject payload{{QStringLiteral("dataset_dir"), capture_dataset_path_}};
+  const QJsonObject payload{
+    {QStringLiteral("dataset_dir"), capture_dataset_path_},
+    {QStringLiteral("target_fps"), 30.0},
+    {QStringLiteral("max_sync_delta_s"), 0.02},
+    {QStringLiteral("fps_tolerance_ratio"), 0.3},
+  };
   const auto reply = network_->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QByteArray body = reply->readAll();
@@ -1532,7 +1542,7 @@ void MainWindow::start_lerobot_export(
     {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
     {QStringLiteral("output_dir"), output_dir},
     {QStringLiteral("profile"), profile},
-    {QStringLiteral("fps"), 15.0},
+    {QStringLiteral("fps"), 30.0},
     {QStringLiteral("cameras"), QJsonArray{QStringLiteral("external"), QStringLiteral("wrist")}},
   };
   const auto reply = network_->post(

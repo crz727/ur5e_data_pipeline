@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable, Mapping, Optional
 
-from data_collection_pkg.dataset.cleaner import clean_original_dataset
+from data_collection_pkg.dataset.cleaner import CleaningConfig, clean_original_dataset
 from data_collection_pkg.dataset.converter import (
     convert_jsonl_to_lerobot,
     preflight_jsonl_to_lerobot,
@@ -217,7 +217,11 @@ class CaptureManager:
             return {"ok": False, "error": "stop capture before cleaning"}
         dataset_dir = Path(str(payload.get("dataset_dir", ""))).expanduser()
         try:
-            return clean_original_dataset(dataset_dir)
+            return clean_original_dataset(dataset_dir, config=CleaningConfig(
+                target_fps=float(payload.get("target_fps", 30.0)),
+                max_sync_delta_s=float(payload.get("max_sync_delta_s", 0.02)),
+                fps_tolerance_ratio=float(payload.get("fps_tolerance_ratio", 0.3)),
+            ))
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -246,7 +250,7 @@ class CaptureManager:
                 cleaned_dataset_dir,
                 output_dir=output_dir,
                 repo_id=payload.get("repo_id") or None,
-                fps=float(payload.get("fps", 15.0)),
+                fps=float(payload.get("fps", 30.0)),
                 cameras=cameras,
                 visual_storage=str(payload.get("visual_storage", "video")),
                 video_codec=str(payload.get("video_codec", "h264")),
@@ -403,7 +407,7 @@ class CaptureManager:
             *annotation_args,
             f"dataset_stage:={dataset_stage}",
             f"runtime_mode:={runtime_mode}",
-            f"sample_rate_hz:={payload.get('sample_rate_hz', 15.0)}",
+            f"sample_rate_hz:={payload.get('sample_rate_hz', 30.0)}",
             f"sampling_clock:={payload.get('sampling_clock', 'scene_camera_header')}",
             f"gripper_state_topic:={payload.get('gripper_state_topic', '/binary_gripper_state')}",
             f"gripper_state_msg_type:={payload.get('gripper_state_msg_type', 'std_msgs.msg:Int8')}",
@@ -413,9 +417,9 @@ class CaptureManager:
             f"wrist_camera_msg_type:={payload.get('wrist_camera_msg_type', 'sensor_msgs.msg:CompressedImage')}",
             f"end_effector_pose_topic:={payload.get('end_effector_pose_topic', '/tcp_pose_broadcaster/pose')}",
             f"required_cameras:={payload.get('required_cameras', 'external,wrist')}",
-            f"max_sync_delta_s:={payload.get('max_sync_delta_s', 0.07)}",
-            f"state_max_sync_delta_s:={payload.get('state_max_sync_delta_s', 0.07)}",
+            f"max_sync_delta_s:={payload.get('max_sync_delta_s', 0.02)}",
             f"camera_sync_tolerance_s:={payload.get('camera_sync_tolerance_s', 0.02)}",
+            f"joint_state_sync_tolerance_s:={payload.get('joint_state_sync_tolerance_s', payload.get('state_max_sync_delta_s', 0.02))}",
             f"gripper_sync_tolerance_s:={payload.get('gripper_sync_tolerance_s', 0.03)}",
             f"scene_camera_settle_delay_s:={payload.get('scene_camera_settle_delay_s', 0.07)}",
             f"camera_receive_delay_health_threshold_s:={payload.get('camera_receive_delay_health_threshold_s', 0.05)}",

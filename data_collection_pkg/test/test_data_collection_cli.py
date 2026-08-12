@@ -115,7 +115,7 @@ def test_cli_accepts_independent_repo_id_and_camera_mapping(tmp_path, monkeypatc
 
     assert calls[0][1]["output_dir"] == tmp_path / "exported"
     assert calls[0][1]["repo_id"] == "lab/another-name"
-    assert calls[0][1]["fps"] == 15.0
+    assert calls[0][1]["fps"] == 30.0
     assert calls[0][1]["cameras"] == (("pano", "external"),)
     assert calls[0][1]["visual_storage"] == "video"
     assert calls[0][1]["profile"] == "act"

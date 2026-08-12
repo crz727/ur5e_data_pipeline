@@ -50,14 +50,15 @@ def default_teleop_collector_config() -> dict:
         ),
         "default_required_cameras": ("external", "wrist"),
         "sync_tolerance_s": 0.07,
-        "state_sync_tolerance_s": 0.07,
+        "state_sync_tolerance_s": 0.02,
+        "joint_state_sync_tolerance_s": 0.02,
         "sampling_clock": "timer",
         "camera_sync_tolerance_s": 0.02,
         "gripper_sync_tolerance_s": 0.03,
         "scene_camera_settle_delay_s": 0.07,
         "camera_receive_delay_health_threshold_s": 0.05,
         "sampling_mode": "action_triggered",
-        "sample_rate_hz": 15.0,
+        "sample_rate_hz": 30.0,
         "image_storage_format": "jpeg",
         "jpeg_quality": 75,
         "status_topic": "/data_collection/quality_status",
@@ -710,11 +711,16 @@ def teleop_collector_config_from_parameters(node) -> dict:
         _parameter_value(node, "required_cameras", ",".join(config["default_required_cameras"]))
     )
     sync_tolerance_s = float(_parameter_value(node, "max_sync_delta_s", config["sync_tolerance_s"]))
-    state_sync_tolerance_s = float(_parameter_value(
+    joint_state_sync_tolerance_value = _parameter_value(
         node,
-        "state_max_sync_delta_s",
-        config["state_sync_tolerance_s"],
-    ))
+        "joint_state_sync_tolerance_s",
+        None,
+    )
+    state_sync_tolerance_s = float(
+        joint_state_sync_tolerance_value
+        if joint_state_sync_tolerance_value is not None
+        else _parameter_value(node, "state_max_sync_delta_s", config["state_sync_tolerance_s"])
+    )
     if sampling_mode == "fixed_rate":
         schema = "qpos_gripper"
         required_topics = (
@@ -772,6 +778,7 @@ def teleop_collector_config_from_parameters(node) -> dict:
         "default_required_cameras": required_cameras,
         "sync_tolerance_s": sync_tolerance_s,
         "state_sync_tolerance_s": state_sync_tolerance_s,
+        "joint_state_sync_tolerance_s": state_sync_tolerance_s,
         "required_topics": required_topics,
         "optional_topics": optional_topics,
     })
@@ -832,9 +839,10 @@ def _declare_parameters(node) -> None:
     declare("dataset_stage", "original")
     declare("dataset_schema", "teleop_twist_gripper")
     declare("sampling_mode", "action_triggered")
-    declare("sample_rate_hz", 15.0)
+    declare("sample_rate_hz", 30.0)
     declare("sampling_clock", "timer")
     declare("camera_sync_tolerance_s", 0.02)
+    declare("joint_state_sync_tolerance_s", None)
     declare("gripper_sync_tolerance_s", 0.03)
     declare("scene_camera_settle_delay_s", 0.07)
     declare("camera_receive_delay_health_threshold_s", 0.05)

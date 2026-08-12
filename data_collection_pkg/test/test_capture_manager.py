@@ -85,7 +85,7 @@ def test_capture_manager_forwards_scene_camera_clock_overrides(tmp_path):
     assert "sampling_clock:=scene_camera_header" in command
     assert "sample_rate_hz:=30.0" in command
     assert "camera_sync_tolerance_s:=0.02" in command
-    assert "state_max_sync_delta_s:=0.02" in command
+    assert "joint_state_sync_tolerance_s:=0.02" in command
     assert "gripper_sync_tolerance_s:=0.03" in command
     assert "scene_camera_settle_delay_s:=0.07" in command
 
@@ -205,7 +205,7 @@ def test_vla_english_instruction_validation_rejects_missing_and_placeholder_text
     assert task_annotations.validate_vla_english_instruction("Pick up the red block.") is None
 
 
-def test_capture_manager_uses_15hz_when_no_rate_is_requested(tmp_path):
+def test_capture_manager_uses_30hz_and_separate_sync_tolerances_by_default(tmp_path):
     calls = []
     manager = CaptureManager(
         root=tmp_path,
@@ -214,9 +214,10 @@ def test_capture_manager_uses_15hz_when_no_rate_is_requested(tmp_path):
 
     manager.start({"runtime_mode": "teleop", "task": "pick"})
 
-    assert "sample_rate_hz:=15.0" in calls[0]
-    assert "max_sync_delta_s:=0.07" in calls[0]
-    assert "state_max_sync_delta_s:=0.07" in calls[0]
+    assert "sample_rate_hz:=30.0" in calls[0]
+    assert "camera_sync_tolerance_s:=0.02" in calls[0]
+    assert "joint_state_sync_tolerance_s:=0.02" in calls[0]
+    assert "gripper_sync_tolerance_s:=0.03" in calls[0]
 
 
 def test_capture_manager_new_task_creates_current_task_folder(tmp_path):
@@ -301,6 +302,33 @@ def test_capture_manager_refuses_cleaning_while_capture_is_running(tmp_path):
     assert result["error"] == "stop capture before cleaning"
 
 
+def test_capture_manager_forwards_cleaning_quality_overrides(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_clean(dataset_dir, config):
+        captured["dataset_dir"] = dataset_dir
+        captured["config"] = config
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "data_collection_pkg.visualization.capture_manager.clean_original_dataset", fake_clean
+    )
+    manager = CaptureManager(root=tmp_path)
+
+    result = manager.clean({
+        "dataset_dir": str(tmp_path / "original"),
+        "target_fps": 25.0,
+        "max_sync_delta_s": 0.015,
+        "fps_tolerance_ratio": 0.1,
+    })
+
+    assert result == {"ok": True}
+    assert captured["dataset_dir"] == tmp_path / "original"
+    assert captured["config"].target_fps == 25.0
+    assert captured["config"].max_sync_delta_s == 0.015
+    assert captured["config"].fps_tolerance_ratio == 0.1
+
+
 def test_capture_manager_exports_lerobot_in_background(tmp_path):
     started = threading.Event()
     release = threading.Event()
@@ -358,7 +386,7 @@ def test_capture_manager_forwards_normalized_vla_profile_and_rejects_invalid_pro
         {
             "output_dir": tmp_path / "lerobot",
             "repo_id": None,
-            "fps": 15.0,
+            "fps": 30.0,
             "cameras": ("external", "wrist"),
             "visual_storage": "video",
             "video_codec": "h264",

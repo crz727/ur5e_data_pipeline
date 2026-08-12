@@ -63,11 +63,11 @@ def test_hardware_qpos_collection_launch_is_packaged_and_fixed_rate():
     assert '"sampling_mode": "fixed_rate"' in launch_text
     assert '"dataset_stage": LaunchConfiguration("dataset_stage")' in launch_text
     assert '"dataset_schema": "qpos_gripper"' in launch_text
-    assert 'DeclareLaunchArgument("sample_rate_hz", default_value="15.0")' in launch_text
+    assert 'DeclareLaunchArgument("sample_rate_hz", default_value="30.0")' in launch_text
     assert 'DeclareLaunchArgument("gripper_state_topic", default_value="/binary_gripper_state")' in launch_text
     assert 'DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Int8")' in launch_text
     assert 'DeclareLaunchArgument("max_sync_delta_s", default_value="0.07")' in launch_text
-    assert 'DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.07")' in launch_text
+    assert 'DeclareLaunchArgument("joint_state_sync_tolerance_s", default_value="0.02")' in launch_text
     assert 'DeclareLaunchArgument("sampling_clock", default_value="scene_camera_header")' in launch_text
     assert 'DeclareLaunchArgument("camera_sync_tolerance_s", default_value="0.02")' in launch_text
     assert 'DeclareLaunchArgument("gripper_sync_tolerance_s", default_value="0.03")' in launch_text
@@ -90,6 +90,8 @@ def test_hardware_qpos_launch_defaults_are_binary_gripper_topic(monkeypatch):
     assert declared["gripper_state_topic"] == "/binary_gripper_state"
     assert declared["gripper_state_msg_type"] == "std_msgs.msg:Int8"
     assert declared["sampling_clock"] == "scene_camera_header"
+    assert declared["sample_rate_hz"] == "30.0"
+    assert declared["joint_state_sync_tolerance_s"] == "0.02"
 
 
 def test_hardware_qpos_launch_declares_and_forwards_task_language_parameters(monkeypatch):

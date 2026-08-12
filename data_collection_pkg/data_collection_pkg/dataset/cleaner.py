@@ -22,8 +22,8 @@ class CleaningConfig:
     """Conservative, configurable quality gates for trainable demonstrations."""
 
     required_cameras: tuple[str, ...] = ("external", "wrist")
-    max_sync_delta_s: float = 0.07
-    target_fps: float = 15.0
+    max_sync_delta_s: float = 0.02
+    target_fps: float = 30.0
     fps_tolerance_ratio: float = 0.3
     min_frame_count: int = 30
     min_duration_s: float = 2.0
