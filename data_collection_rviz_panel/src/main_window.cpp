@@ -35,6 +35,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QKeySequence>
 #include <QMenu>
@@ -713,6 +714,9 @@ void MainWindow::build_ui()
   capture_toggle_button_ = new QPushButton(QStringLiteral("Start Capture"), capture_box);
   clean_dataset_button_ = new QPushButton(QStringLiteral("Clean Data"), capture_box);
   capture_status_value_ = make_value_label(QStringLiteral("Idle"));
+  lerobot_export_progress_ = new QProgressBar(capture_box);
+  lerobot_export_progress_->setTextVisible(false);
+  lerobot_export_progress_->hide();
   capture_layout->addWidget(new QLabel(QStringLiteral("Mode")), 0, 0);
   capture_layout->addWidget(capture_mode_, 0, 1);
   capture_layout->addWidget(new QLabel(QStringLiteral("Task")), 1, 0);
@@ -723,7 +727,8 @@ void MainWindow::build_ui()
   capture_layout->addWidget(clean_dataset_button_, 2, 2);
   capture_layout->addWidget(new QLabel(QStringLiteral("Write status")), 3, 0);
   capture_layout->addWidget(capture_status_value_, 3, 1, 1, 2);
-  capture_layout->addWidget(dataset_path_value_, 4, 0, 1, 3);
+  capture_layout->addWidget(lerobot_export_progress_, 4, 0, 1, 3);
+  capture_layout->addWidget(dataset_path_value_, 5, 0, 1, 3);
   connect(new_task, &QPushButton::clicked, this, [this]() {
     post_json(QStringLiteral("/api/capture/new-task"), {{QStringLiteral("task"), capture_task_->text()}});
   });
@@ -1518,6 +1523,7 @@ void MainWindow::start_lerobot_export(
   const QString profile_label = profile.toUpper();
   lerobot_export_profile_ = profile;
   lerobot_export_in_progress_ = true;
+  set_lerobot_export_activity(true);
   capture_status_value_->setText(QStringLiteral("%1 export queued...").arg(profile_label));
   QNetworkRequest request(QUrl(
     QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot")));
@@ -1542,6 +1548,7 @@ void MainWindow::start_lerobot_export(
       const QString error = document.isObject() ?
         response.value(QStringLiteral("error")).toString() : transport_error;
       lerobot_export_in_progress_ = false;
+      set_lerobot_export_activity(false);
       show_temporary_capture_status(QStringLiteral("%1 export could not start: %2").arg(
         profile_label, error.isEmpty() ? QStringLiteral("backend unavailable") : error));
       return;
@@ -1579,6 +1586,7 @@ void MainWindow::request_lerobot_export_status()
     }
     if (status == QStringLiteral("done")) {
       lerobot_export_in_progress_ = false;
+      set_lerobot_export_activity(false);
       const QJsonObject result = response.value(QStringLiteral("result")).toObject();
       show_temporary_capture_status(QStringLiteral("%1 export complete: %2").arg(
         profile_label, result.value(QStringLiteral("output_dir")).toString()));
@@ -1590,6 +1598,7 @@ void MainWindow::request_lerobot_export_status()
     }
     if (status == QStringLiteral("failed")) {
       lerobot_export_in_progress_ = false;
+      set_lerobot_export_activity(false);
       show_temporary_capture_status(QStringLiteral("%1 export failed: %2").arg(
         profile_label,
         response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
@@ -1599,6 +1608,21 @@ void MainWindow::request_lerobot_export_status()
       "%1 export status unavailable: invalid backend response").arg(profile_label));
     QTimer::singleShot(1000, this, &MainWindow::request_lerobot_export_status);
   });
+}
+
+void MainWindow::set_lerobot_export_activity(bool active)
+{
+  if (lerobot_export_progress_ == nullptr) {
+    return;
+  }
+  if (active) {
+    lerobot_export_progress_->setRange(0, 0);
+    lerobot_export_progress_->show();
+    return;
+  }
+  lerobot_export_progress_->setRange(0, 1);
+  lerobot_export_progress_->setValue(0);
+  lerobot_export_progress_->hide();
 }
 
 void MainWindow::request_replay_episodes()
