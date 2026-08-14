@@ -69,6 +69,8 @@ private:
   void update_dashboard_state(const QJsonObject & state);
   void update_camera(QLabel * label, const sensor_msgs::msg::CompressedImage & image);
   void request_mode(const QString & mode);
+  void request_existing_dataset();
+  void request_standalone_lerobot_export();
   void start_control_services();
   void stop_control_services();
   void check_control_api_health();
@@ -135,6 +137,8 @@ private:
   QProgressBar * lerobot_export_progress_{nullptr};
   QPushButton * capture_toggle_button_{nullptr};
   QPushButton * clean_dataset_button_{nullptr};
+  QPushButton * continue_dataset_button_{nullptr};
+  QPushButton * convert_lerobot_button_{nullptr};
   QPushButton * language_instruction_button_{nullptr};
   QPushButton * idle_button_{nullptr};
   QPushButton * auto_button_{nullptr};
