@@ -28,6 +28,31 @@ source /home/crz/src/install/setup.bash
 ros2 run ur5e_mode_manager mode_manager
 ```
 
+### Qt 控制服务按钮
+
+当前 Qt 面板的 `Mode Manager` 区域提供一个 `Start control services` /
+`Stop control services` 按钮。它只能管理由当前这一个 Qt 实例启动的两个上层
+进程：
+
+```text
+ros2 run ur5e_http_api run_api
+ros2 run ur5e_mode_manager mode_manager
+```
+
+使用该按钮时，不要同时用终端启动这两个进程。按钮先等待 HTTP API 的
+`/api/health` 成功，再启动 Mode Manager，并等待 `/control_mode/status`。停止时
+它先请求 `idle`，等待状态为 `IDLE` 且 owner 为 `none`，然后依次停止 Mode
+Manager 和 HTTP API。
+
+UR driver、External Control、controller manager、相机、夹爪和 dashboard
+backend 始终由外部启动；该按钮不会启动或停止它们。若 API 或 Mode Manager 已由
+外部终端启动，面板显示 `externally managed`，不会创建重复进程，也不会停止该
+外部进程。关闭 Qt 面板不会停止控制服务。
+
+HIL 中从自动策略交给遥操作时，先选择 `IDLE`，等待面板显示
+`state=IDLE`、`owner=none`，再选择 `TELEOP`。这会停止自动策略并确认机器人
+停稳；重新进入 `AUTO` 会启动新的策略进程，而不是恢复此前的策略内部状态。
+
 确认 ROS 图和机器人描述：
 
 ```bash

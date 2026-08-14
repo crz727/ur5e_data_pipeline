@@ -5,6 +5,7 @@
 
 #include <QJsonArray>
 #include <QMainWindow>
+#include <QtGlobal>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
@@ -68,6 +69,28 @@ private:
   void update_dashboard_state(const QJsonObject & state);
   void update_camera(QLabel * label, const sensor_msgs::msg::CompressedImage & image);
   void request_mode(const QString & mode);
+  void start_control_services();
+  void stop_control_services();
+  void check_control_api_health();
+  void start_control_mode_manager();
+  void stop_owned_mode_manager();
+  void stop_owned_control_api();
+  void check_owned_control_processes_stopped();
+  void fail_control_services_start(const QString & reason);
+  void update_control_services_button();
+  void handle_control_services_timeout();
+
+  enum class ControlServicesState
+  {
+    Stopped,
+    CheckingExternalApi,
+    StartingApi,
+    StartingModeManager,
+    Running,
+    WaitingForIdle,
+    StoppingModeManager,
+    StoppingApi,
+  };
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::executors::MultiThreadedExecutor::SharedPtr executor_;
@@ -91,6 +114,9 @@ private:
 
   QNetworkAccessManager * network_{nullptr};
   QTimer * state_timer_{nullptr};
+  QTimer * control_services_timeout_timer_{nullptr};
+  qint64 control_api_pid_{0};
+  qint64 control_mode_manager_pid_{0};
   QLabel * connection_label_{nullptr};
   QLabel * robot_health_value_{nullptr};
   QLabel * scene_camera_health_value_{nullptr};
@@ -103,6 +129,7 @@ private:
   QLabel * mode_owner_value_{nullptr};
   QLabel * mode_step_value_{nullptr};
   QLabel * mode_fault_value_{nullptr};
+  QLabel * control_services_status_value_{nullptr};
   QLabel * capture_status_value_{nullptr};
   QLabel * dataset_path_value_{nullptr};
   QProgressBar * lerobot_export_progress_{nullptr};
@@ -113,6 +140,7 @@ private:
   QPushButton * auto_button_{nullptr};
   QPushButton * api_button_{nullptr};
   QPushButton * teleop_button_{nullptr};
+  QPushButton * control_services_button_{nullptr};
   QComboBox * capture_mode_{nullptr};
   QLineEdit * capture_task_{nullptr};
   QLineEdit * replay_dataset_path_{nullptr};
@@ -148,10 +176,14 @@ private:
   bool replay_mode_active_{false};
   bool replay_timeline_dragging_{false};
   bool cleaning_in_progress_{false};
+  bool capture_annotation_in_progress_{false};
   bool lerobot_export_in_progress_{false};
   bool language_editor_request_in_progress_{false};
   bool capture_status_override_active_{false};
+  bool services_owned_{false};
+  bool mode_status_received_{false};
   int capture_status_override_generation_{0};
+  ControlServicesState control_services_state_{ControlServicesState::Stopped};
 };
 
 }  // namespace data_collection_rviz_panel
