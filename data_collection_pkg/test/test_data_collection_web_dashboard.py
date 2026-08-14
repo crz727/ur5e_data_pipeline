@@ -291,6 +291,24 @@ def test_dashboard_preflight_and_task_labels_require_capture_controls():
     assert preflight.get_json()["error"] == "capture controls disabled"
 
 
+def test_dashboard_select_existing_dataset_delegates_to_capture_manager():
+    class ExistingDatasetManager:
+        def select_existing_dataset(self, payload):
+            self.payload = payload
+            return {"ok": True, "dataset_dir": payload["dataset_dir"], "runtime_mode": "teleop"}
+
+    manager = ExistingDatasetManager()
+    app = create_dashboard_app(DashboardStateStore(), capture_manager=manager)
+    response = app.test_client().post(
+        "/api/capture/select-existing-dataset",
+        json={"dataset_dir": "/tmp/task/original/teleop/qpos_gripper"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["runtime_mode"] == "teleop"
+    assert manager.payload["dataset_dir"].endswith("qpos_gripper")
+
+
 def test_dashboard_preflight_rejects_non_object_json_payloads():
     class Manager:
         def preflight_lerobot_export(self, _payload):

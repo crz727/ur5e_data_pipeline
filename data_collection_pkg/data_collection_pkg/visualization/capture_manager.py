@@ -50,6 +50,9 @@ class CaptureManager:
         self._log_stream = None
         self.current_task = None
         self.current_task_root = None
+        self.current_dataset_dir = None
+        self.current_runtime_mode = None
+        self.command = None
         self.current_task_annotation = {}
         self._episode_indices_before = set()
         self._pending_annotation_batches = []
@@ -73,6 +76,8 @@ class CaptureManager:
         task_root.mkdir(parents=True, exist_ok=True)
         self.current_task = task
         self.current_task_root = task_root
+        self.current_dataset_dir = None
+        self.current_runtime_mode = None
         self.current_task_annotation = {}
         return {
             "ok": True,
@@ -80,6 +85,37 @@ class CaptureManager:
             "task": task,
             "task_root": str(task_root),
         }
+
+    def select_existing_dataset(self, payload: Mapping) -> dict:
+        if self._is_running():
+            return {"ok": False, "running": True, "error": "stop capture before selecting a dataset"}
+        try:
+            dataset_dir = Path(str(payload.get("dataset_dir", ""))).expanduser().resolve()
+            if (dataset_dir.name != "qpos_gripper" or dataset_dir.parent.parent.name != "original" or
+                    dataset_dir.parent.name not in ALLOWED_RUNTIME_MODES or
+                    not (dataset_dir / "meta" / "episodes.jsonl").is_file()):
+                raise ValueError("dataset_dir must be original/<mode>/qpos_gripper with meta/episodes.jsonl")
+            rows = _episode_rows(dataset_dir)
+            if not rows:
+                raise ValueError("existing dataset contains no episodes")
+            latest = max(rows, key=lambda row: int(row.get("episode_index", -1)))
+            self.current_task = _safe_task_name(latest.get("task") or dataset_dir.parents[2].name)
+            self.current_task_root = dataset_dir.parents[2]
+            self.current_dataset_dir = dataset_dir
+            self.current_runtime_mode = dataset_dir.parent.name
+            self.command = None
+            self.current_task_annotation = {
+                key: str(latest.get(key, ""))
+                for key in ("task_id", "language_instruction_en", "language_instruction_zh")
+                if latest.get(key) is not None
+            }
+            return {"ok": True, "running": False, "task": self.current_task,
+                    "task_root": str(self.current_task_root), "dataset_dir": str(dataset_dir),
+                    "runtime_mode": self.current_runtime_mode,
+                    "task_annotation": self.current_task_annotation,
+                    "next_episode_index": max(_episode_indices(dataset_dir), default=-1) + 1}
+        except (OSError, ValueError, TypeError) as exc:
+            return {"ok": False, "running": False, "error": str(exc)}
 
     def start(self, payload: Mapping) -> dict:
         """Start a hardware qpos collector for one runtime mode."""
@@ -98,6 +134,9 @@ class CaptureManager:
                 "running": False,
                 "error": f"runtime_mode must be one of {', '.join(ALLOWED_RUNTIME_MODES)}",
             }
+        if self.current_dataset_dir is not None and runtime_mode != self.current_runtime_mode:
+            return {"ok": False, "running": False,
+                    "error": "runtime_mode must match selected dataset mode"}
 
         if self.current_task_root is None:
             self.new_task({"task": payload.get("task") or f"{runtime_mode}_segment"})
@@ -117,7 +156,7 @@ class CaptureManager:
             return {"ok": False, "running": False, "error": str(exc)}
         self.current_task_annotation = annotation
         dataset_stage = str(payload.get("dataset_stage", "original")).strip() or "original"
-        dataset_dir = task_root / dataset_stage / runtime_mode / "qpos_gripper"
+        dataset_dir = self.current_dataset_dir or task_root / dataset_stage / runtime_mode / "qpos_gripper"
         command = self._command(
             payload, runtime_mode, task, dataset_stage, task_root, annotation
         )
@@ -360,6 +399,11 @@ class CaptureManager:
                 task_root = Path(values["root"])
             if runtime_mode and dataset_stage:
                 dataset_dir = str(task_root / dataset_stage / runtime_mode / "qpos_gripper")
+        elif self.current_dataset_dir is not None:
+            dataset_dir = str(self.current_dataset_dir)
+            runtime_mode = self.current_runtime_mode
+            dataset_stage = "original"
+            task = self.current_task
         return {
             "running": running,
             "age_s": age_s,
@@ -371,6 +415,8 @@ class CaptureManager:
             "dataset_dir": dataset_dir,
             "log_path": None if self.log_path is None else str(self.log_path),
             "returncode": None if self.process is None else self.process.poll(),
+            "task_annotation": self.current_task_annotation,
+            "selected_existing_dataset": self.current_dataset_dir is not None,
         }
 
     def _command(
@@ -495,6 +541,11 @@ def _episode_indices(dataset_dir: Path) -> set:
             for line in stream
             if line.strip()
         }
+
+
+def _episode_rows(dataset_dir: Path) -> list[dict]:
+    with (Path(dataset_dir) / "meta" / "episodes.jsonl").open("r", encoding="utf-8-sig") as stream:
+        return [json.loads(line) for line in stream if line.strip()]
 
 
 def _launch_arg_values(command: list) -> dict:

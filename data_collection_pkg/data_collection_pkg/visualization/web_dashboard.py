@@ -324,6 +324,13 @@ def create_dashboard_app(store: DashboardStateStore, capture_manager=None) -> Fl
         result = capture_manager.new_task(request.get_json(silent=True) or {})
         return jsonify(result), 200 if result.get("ok") else 409
 
+    @app.post("/api/capture/select-existing-dataset")
+    def api_capture_select_existing_dataset():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 404
+        result = capture_manager.select_existing_dataset(request.get_json(silent=True) or {})
+        return jsonify(result), 200 if result.get("ok") else 409
+
     @app.post("/api/capture/stop")
     def api_capture_stop():
         if capture_manager is None:
