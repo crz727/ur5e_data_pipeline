@@ -54,9 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Create a sibling cleaned dataset from an original qpos_gripper dataset",
     )
     clean.add_argument("dataset_dir")
-    clean.add_argument("--target-fps", type=float, default=30.0)
+    clean.add_argument("--target-fps", type=float, default=15.0)
     clean.add_argument("--max-sync-delta-s", type=float, default=0.02)
-    clean.add_argument("--fps-tolerance-ratio", type=float, default=0.3)
+    clean.add_argument("--fps-tolerance-ratio", type=float, default=0.5)
 
     replay = subparsers.add_parser("simulate-replay", help="Dry-run replay simulation")
     replay.add_argument("dataset_dir")
@@ -72,7 +72,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-root", dest="output_dir", help=argparse.SUPPRESS)
     convert.add_argument("--repo-id")
     convert.add_argument("--profile", choices=("act", "vla"), default="act")
-    convert.add_argument("--fps", type=float, default=30.0)
+    convert.add_argument("--fps", type=float, default=15.0)
     convert.add_argument("--robot-type", default="ur5e")
     convert.add_argument("--camera", action="append", default=[])
     convert.add_argument("--visual-storage", choices=("video", "image"), default="video")

@@ -58,7 +58,7 @@ def default_teleop_collector_config() -> dict:
         "scene_camera_settle_delay_s": 0.07,
         "camera_receive_delay_health_threshold_s": 0.05,
         "sampling_mode": "action_triggered",
-        "sample_rate_hz": 30.0,
+        "sample_rate_hz": 15.0,
         "image_storage_format": "jpeg",
         "jpeg_quality": 75,
         "status_topic": "/data_collection/quality_status",
@@ -839,7 +839,7 @@ def _declare_parameters(node) -> None:
     declare("dataset_stage", "original")
     declare("dataset_schema", "teleop_twist_gripper")
     declare("sampling_mode", "action_triggered")
-    declare("sample_rate_hz", 30.0)
+    declare("sample_rate_hz", 15.0)
     declare("sampling_clock", "timer")
     declare("camera_sync_tolerance_s", 0.02)
     declare("joint_state_sync_tolerance_s", None)

@@ -23,8 +23,8 @@ class CleaningConfig:
 
     required_cameras: tuple[str, ...] = ("external", "wrist")
     max_sync_delta_s: float = 0.02
-    target_fps: float = 30.0
-    fps_tolerance_ratio: float = 0.3
+    target_fps: float = 15.0
+    fps_tolerance_ratio: float = 0.5
     min_frame_count: int = 30
     min_duration_s: float = 2.0
     motion_window_frames: int = 8

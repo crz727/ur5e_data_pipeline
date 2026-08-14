@@ -316,7 +316,7 @@ def test_act_profile_exports_every_episode_with_task_id_and_default_camera_mappi
     assert summary["profile"] == "act"
     assert summary["episode_count"] == 3
     assert summary["skipped_count"] == 0
-    assert FakeLeRobotDataset.created["fps"] == 30
+    assert FakeLeRobotDataset.created["fps"] == 15
     assert FakeLeRobotDataset.created["robot_type"] == "ur5e"
     assert FakeLeRobotDataset.created["features"]["observation.state"]["shape"] == (7,)
     assert FakeLeRobotDataset.created["features"]["action"]["shape"] == (7,)

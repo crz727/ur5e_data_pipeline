@@ -205,7 +205,7 @@ def test_vla_english_instruction_validation_rejects_missing_and_placeholder_text
     assert task_annotations.validate_vla_english_instruction("Pick up the red block.") is None
 
 
-def test_capture_manager_uses_30hz_and_separate_sync_tolerances_by_default(tmp_path):
+def test_capture_manager_uses_15hz_and_separate_sync_tolerances_by_default(tmp_path):
     calls = []
     manager = CaptureManager(
         root=tmp_path,
@@ -214,10 +214,32 @@ def test_capture_manager_uses_30hz_and_separate_sync_tolerances_by_default(tmp_p
 
     manager.start({"runtime_mode": "teleop", "task": "pick"})
 
-    assert "sample_rate_hz:=30.0" in calls[0]
+    assert "sample_rate_hz:=15.0" in calls[0]
     assert "camera_sync_tolerance_s:=0.02" in calls[0]
     assert "joint_state_sync_tolerance_s:=0.02" in calls[0]
     assert "gripper_sync_tolerance_s:=0.03" in calls[0]
+
+
+def test_capture_manager_formats_integer_rate_for_ros_double_parameter(tmp_path):
+    calls = []
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda command, **kwargs: calls.append(command) or FakeProcess(),
+    )
+
+    manager.start({
+        "runtime_mode": "teleop",
+        "task": "pick",
+        "sample_rate_hz": 30,
+        "camera_sync_tolerance_s": 0,
+        "joint_state_sync_tolerance_s": 0,
+        "gripper_sync_tolerance_s": 0,
+    })
+
+    assert "sample_rate_hz:=30.0" in calls[0]
+    assert "camera_sync_tolerance_s:=0.0" in calls[0]
+    assert "joint_state_sync_tolerance_s:=0.0" in calls[0]
+    assert "gripper_sync_tolerance_s:=0.0" in calls[0]
 
 
 def test_capture_manager_new_task_creates_current_task_folder(tmp_path):
@@ -329,6 +351,24 @@ def test_capture_manager_forwards_cleaning_quality_overrides(tmp_path, monkeypat
     assert captured["config"].fps_tolerance_ratio == 0.1
 
 
+def test_capture_manager_uses_15hz_cleaning_tolerance_defaults(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_clean(_dataset_dir, config):
+        captured["config"] = config
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "data_collection_pkg.visualization.capture_manager.clean_original_dataset", fake_clean
+    )
+
+    result = CaptureManager(root=tmp_path).clean({"dataset_dir": str(tmp_path / "original")})
+
+    assert result == {"ok": True}
+    assert captured["config"].target_fps == 15.0
+    assert captured["config"].fps_tolerance_ratio == 0.5
+
+
 def test_capture_manager_exports_lerobot_in_background(tmp_path):
     started = threading.Event()
     release = threading.Event()
@@ -386,7 +426,7 @@ def test_capture_manager_forwards_normalized_vla_profile_and_rejects_invalid_pro
         {
             "output_dir": tmp_path / "lerobot",
             "repo_id": None,
-            "fps": 30.0,
+            "fps": 15.0,
             "cameras": ("external", "wrist"),
             "visual_storage": "video",
             "video_codec": "h264",
@@ -534,6 +574,38 @@ def test_capture_manager_annotates_only_episodes_added_by_completed_capture(tmp_
         (2, "success"),
     ]
     assert all(row["review_status"] == "reviewed" for row in rows)
+
+
+def test_capture_manager_preserves_stopped_annotation_when_next_capture_starts(tmp_path):
+    processes = []
+
+    def fake_popen(*_args, **_kwargs):
+        process = FakeProcess()
+        processes.append(process)
+        return process
+
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=fake_popen,
+        now=lambda: 1785488195.0,
+    )
+    first = manager.start({"runtime_mode": "teleop", "task": "pick"})
+    first_metadata = Path(first["dataset_dir"]) / "meta" / "episodes.jsonl"
+    first_metadata.parent.mkdir(parents=True)
+    first_metadata.write_text(json.dumps({"episode_index": 0}) + "\n", encoding="utf-8")
+    manager.stop()
+
+    manager.start({"runtime_mode": "teleop", "task": "pick"})
+    result = manager.annotate({"outcome": "success"})
+
+    rows = [
+        json.loads(line)
+        for line in Path(result["annotation_path"]).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(processes) == 2
+    assert result["ok"] is True
+    assert result["dataset_dir"] == first["dataset_dir"]
+    assert [(row["episode_index"], row["outcome"]) for row in rows] == [(0, "success")]
 
 
 def test_capture_manager_snapshots_episode_indices_before_starting_collector(tmp_path):

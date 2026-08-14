@@ -30,7 +30,7 @@ def convert_jsonl_to_lerobot(
     output_dir: Path = None,
     output_root: Path = None,
     repo_id: str = None,
-    fps: float = 30.0,
+    fps: float = 15.0,
     robot_type: str = "ur5e",
     cameras: Sequence[str] = (),
     visual_storage: str = "video",

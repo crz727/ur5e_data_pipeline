@@ -44,7 +44,7 @@ def _write_original_dataset(tmp_path, annotations, *, episode_metadata=None):
     for episode_index in range(4):
         writer.start_episode()
         for frame_index in range(61):
-            timestamp = 10.0 + episode_index * 10.0 + frame_index / 30.0
+            timestamp = 10.0 + episode_index * 10.0 + frame_index / 15.0
             qpos = [0.1 + 0.003 * frame_index, -0.2, 0.3, -0.4, 0.5, -0.6]
             writer.add_frame(_observation(timestamp, qpos=qpos), [0.1] * 7)
         writer.close_episode()
@@ -73,7 +73,7 @@ def _write_motion_episode(tmp_path, *, states, outcome="success"):
     )
     writer.start_episode()
     for frame_index, qpos in enumerate(states):
-        timestamp = 10.0 + frame_index / 30.0
+        timestamp = 10.0 + frame_index / 15.0
         writer.add_frame(_observation(timestamp, qpos=qpos), qpos + [0.4])
     writer.close_episode()
     (writer.dataset_dir / "meta" / "episode_annotations.jsonl").write_text(
@@ -197,7 +197,7 @@ def test_cleaner_reports_unknown_action_schema_without_aborting_the_batch(tmp_pa
     assert manifest[1]["reasons"] == ["action_schema_unknown"]
 
 
-def test_cleaner_trims_only_static_episode_boundaries_at_30hz(tmp_path):
+def test_cleaner_trims_only_static_episode_boundaries_at_15hz(tmp_path):
     base = [0.0] * 6
     states = [base[:] for _ in range(15)]
     states.extend([[0.003 * step] + [0.0] * 5 for step in range(1, 31)])
@@ -231,9 +231,10 @@ def test_cleaner_marks_human_success_without_state_motion_for_review(tmp_path):
     assert manifest["reasons"] == ["no_state_motion"]
 
 
-def test_cleaning_defaults_match_the_30hz_capture_contract():
+def test_cleaning_defaults_match_the_15hz_capture_contract():
     config = CleaningConfig()
 
-    assert config.target_fps == 30.0
+    assert config.target_fps == 15.0
     assert config.max_sync_delta_s == 0.02
+    assert config.fps_tolerance_ratio == 0.5
     assert config.min_frame_count == 30

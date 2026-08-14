@@ -13,7 +13,7 @@ def generate_launch_description():
         DeclareLaunchArgument("language_instruction_zh", default_value=""),
         DeclareLaunchArgument("dataset_stage", default_value="original"),
         DeclareLaunchArgument("runtime_mode", default_value="teleop"),
-        DeclareLaunchArgument("sample_rate_hz", default_value="30.0"),
+        DeclareLaunchArgument("sample_rate_hz", default_value="15.0"),
         DeclareLaunchArgument("sampling_clock", default_value="scene_camera_header"),
         DeclareLaunchArgument("gripper_state_topic", default_value="/binary_gripper_state"),
         DeclareLaunchArgument("external_camera_topic", default_value="/camera2/scene_camera/color/image_raw/compressed"),

@@ -18,7 +18,7 @@ class LeRobotDatasetWriter:
         schema_name: str,
         *,
         repo_id: str,
-        fps: float = 30.0,
+        fps: float = 15.0,
         robot_type: str = "ur5e",
         cameras: Sequence[str] = (),
         image_shape: Optional[Sequence[int]] = None,

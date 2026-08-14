@@ -254,7 +254,7 @@ def test_fixed_rate_config_uses_legacy_state_tolerance_only_without_canonical_pa
 
     assert legacy["state_sync_tolerance_s"] == 0.04
     assert canonical["state_sync_tolerance_s"] == 0.02
-    assert canonical["sample_rate_hz"] == 30.0
+    assert canonical["sample_rate_hz"] == 15.0
 
 
 def test_fixed_rate_adapter_queues_scene_camera_header_only_in_camera_clock_mode(tmp_path):

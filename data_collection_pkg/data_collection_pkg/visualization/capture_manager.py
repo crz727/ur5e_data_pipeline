@@ -52,8 +52,7 @@ class CaptureManager:
         self.current_task_root = None
         self.current_task_annotation = {}
         self._episode_indices_before = set()
-        self._last_stopped_episode_indices = ()
-        self._last_stopped_dataset_dir = None
+        self._pending_annotation_batches = []
         self._export_lock = threading.Lock()
         self._export_thread = None
         self._export_job_id = 0
@@ -124,8 +123,6 @@ class CaptureManager:
         )
         task_root.mkdir(parents=True, exist_ok=True)
         self._episode_indices_before = _episode_indices(dataset_dir)
-        self._last_stopped_episode_indices = ()
-        self._last_stopped_dataset_dir = None
         log_dir = task_root / "_ui_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = log_dir / f"{task}_{int(self.now())}.log"
@@ -180,16 +177,13 @@ class CaptureManager:
 
     def annotate(self, payload: Mapping) -> dict:
         """Append one human outcome annotation for each episode from the last run."""
-        if self._is_running() or not self._last_stopped_episode_indices:
+        if not self._pending_annotation_batches:
             return {"ok": False, "error": "stop a completed capture before annotation"}
         outcome = str(payload.get("outcome", "")).strip().lower()
         if outcome not in {"success", "failure"}:
             return {"ok": False, "error": "outcome must be success or failure"}
-        dataset_dir = self._last_stopped_dataset_dir
-        if dataset_dir is None:
-            return {"ok": False, "error": "capture dataset is unavailable"}
-
-        episode_indices = list(self._last_stopped_episode_indices)
+        dataset_dir, pending_indices = self._pending_annotation_batches[0]
+        episode_indices = list(pending_indices)
         annotation_path = dataset_dir / "meta" / "episode_annotations.jsonl"
         annotation_path.parent.mkdir(parents=True, exist_ok=True)
         with annotation_path.open("a", encoding="utf-8") as stream:
@@ -202,7 +196,7 @@ class CaptureManager:
                     "annotated_at": self.now(),
                     "source": "human",
                 }, ensure_ascii=False) + "\n")
-        self._last_stopped_episode_indices = ()
+        del self._pending_annotation_batches[0]
         return {
             "ok": True,
             "outcome": outcome,
@@ -218,9 +212,9 @@ class CaptureManager:
         dataset_dir = Path(str(payload.get("dataset_dir", ""))).expanduser()
         try:
             return clean_original_dataset(dataset_dir, config=CleaningConfig(
-                target_fps=float(payload.get("target_fps", 30.0)),
+                target_fps=float(payload.get("target_fps", 15.0)),
                 max_sync_delta_s=float(payload.get("max_sync_delta_s", 0.02)),
-                fps_tolerance_ratio=float(payload.get("fps_tolerance_ratio", 0.3)),
+                fps_tolerance_ratio=float(payload.get("fps_tolerance_ratio", 0.5)),
             ))
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -250,7 +244,7 @@ class CaptureManager:
                 cleaned_dataset_dir,
                 output_dir=output_dir,
                 repo_id=payload.get("repo_id") or None,
-                fps=float(payload.get("fps", 30.0)),
+                fps=float(payload.get("fps", 15.0)),
                 cameras=cameras,
                 visual_storage=str(payload.get("visual_storage", "video")),
                 video_codec=str(payload.get("video_codec", "h264")),
@@ -407,7 +401,7 @@ class CaptureManager:
             *annotation_args,
             f"dataset_stage:={dataset_stage}",
             f"runtime_mode:={runtime_mode}",
-            f"sample_rate_hz:={payload.get('sample_rate_hz', 30.0)}",
+            f"sample_rate_hz:={_ros_double(payload.get('sample_rate_hz', 15.0))}",
             f"sampling_clock:={payload.get('sampling_clock', 'scene_camera_header')}",
             f"gripper_state_topic:={payload.get('gripper_state_topic', '/binary_gripper_state')}",
             f"gripper_state_msg_type:={payload.get('gripper_state_msg_type', 'std_msgs.msg:Int8')}",
@@ -417,12 +411,12 @@ class CaptureManager:
             f"wrist_camera_msg_type:={payload.get('wrist_camera_msg_type', 'sensor_msgs.msg:CompressedImage')}",
             f"end_effector_pose_topic:={payload.get('end_effector_pose_topic', '/tcp_pose_broadcaster/pose')}",
             f"required_cameras:={payload.get('required_cameras', 'external,wrist')}",
-            f"max_sync_delta_s:={payload.get('max_sync_delta_s', 0.02)}",
-            f"camera_sync_tolerance_s:={payload.get('camera_sync_tolerance_s', 0.02)}",
-            f"joint_state_sync_tolerance_s:={payload.get('joint_state_sync_tolerance_s', payload.get('state_max_sync_delta_s', 0.02))}",
-            f"gripper_sync_tolerance_s:={payload.get('gripper_sync_tolerance_s', 0.03)}",
-            f"scene_camera_settle_delay_s:={payload.get('scene_camera_settle_delay_s', 0.07)}",
-            f"camera_receive_delay_health_threshold_s:={payload.get('camera_receive_delay_health_threshold_s', 0.05)}",
+            f"max_sync_delta_s:={_ros_double(payload.get('max_sync_delta_s', 0.02))}",
+            f"camera_sync_tolerance_s:={_ros_double(payload.get('camera_sync_tolerance_s', 0.02))}",
+            f"joint_state_sync_tolerance_s:={_ros_double(payload.get('joint_state_sync_tolerance_s', payload.get('state_max_sync_delta_s', 0.02)))}",
+            f"gripper_sync_tolerance_s:={_ros_double(payload.get('gripper_sync_tolerance_s', 0.03))}",
+            f"scene_camera_settle_delay_s:={_ros_double(payload.get('scene_camera_settle_delay_s', 0.07))}",
+            f"camera_receive_delay_health_threshold_s:={_ros_double(payload.get('camera_receive_delay_health_threshold_s', 0.05))}",
             f"image_storage_format:={payload.get('image_storage_format', 'jpeg')}",
             f"jpeg_quality:={payload.get('jpeg_quality', 75)}",
         ]
@@ -439,10 +433,13 @@ class CaptureManager:
         dataset_dir = capture_status.get("dataset_dir")
         if not dataset_dir:
             return
-        self._last_stopped_dataset_dir = Path(dataset_dir)
-        self._last_stopped_episode_indices = tuple(sorted(
-            _episode_indices(self._last_stopped_dataset_dir) - self._episode_indices_before
+        stopped_dataset_dir = Path(dataset_dir)
+        episode_indices = tuple(sorted(
+            _episode_indices(stopped_dataset_dir) - self._episode_indices_before
         ))
+        if episode_indices:
+            self._pending_annotation_batches.append((stopped_dataset_dir, episode_indices))
+        self._episode_indices_before = _episode_indices(stopped_dataset_dir)
 
     def _terminate_process_tree(self) -> None:
         if self.process is None:
@@ -475,6 +472,13 @@ class CaptureManager:
 def _safe_task_name(value) -> str:
     text = str(value).strip() or "capture_segment"
     return "".join(char if char.isalnum() or char in ("_", "-") else "_" for char in text)
+
+
+def _ros_double(value) -> str:
+    """Format a ROS 2 DOUBLE parameter without integer type inference."""
+    number = float(value)
+    text = str(number)
+    return text if "." in text or "e" in text.lower() else f"{text}.0"
 
 
 def _timestamp_label(value: float) -> str:
