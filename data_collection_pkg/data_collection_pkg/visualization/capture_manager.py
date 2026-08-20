@@ -56,6 +56,11 @@ class CaptureManager:
         self.current_task_annotation = {}
         self._episode_indices_before = set()
         self._pending_annotation_batches = []
+        # Protect the process lifecycle from concurrent dashboard requests.
+        # ``_starting`` covers the interval before Popen returns, when poll()
+        # cannot yet identify the new collector.
+        self._capture_lock = threading.RLock()
+        self._starting = False
         self._export_lock = threading.Lock()
         self._export_thread = None
         self._export_job_id = 0
@@ -63,6 +68,10 @@ class CaptureManager:
 
     def new_task(self, payload: Mapping) -> dict:
         """Create/select a new task batch folder under the capture base root."""
+        with self._capture_lock:
+            return self._new_task_impl(payload)
+
+    def _new_task_impl(self, payload: Mapping) -> dict:
         if self._is_running():
             return {
                 "ok": False,
@@ -87,6 +96,10 @@ class CaptureManager:
         }
 
     def select_existing_dataset(self, payload: Mapping) -> dict:
+        with self._capture_lock:
+            return self._select_existing_dataset_impl(payload)
+
+    def _select_existing_dataset_impl(self, payload: Mapping) -> dict:
         if self._is_running():
             return {"ok": False, "running": True, "error": "stop capture before selecting a dataset"}
         try:
@@ -119,13 +132,21 @@ class CaptureManager:
 
     def start(self, payload: Mapping) -> dict:
         """Start a hardware qpos collector for one runtime mode."""
-        if self._is_running():
-            return {
-                "ok": False,
-                "running": True,
-                "error": "capture already running",
-                **self.status(),
-            }
+        with self._capture_lock:
+            if self._starting or self._is_running():
+                return {
+                    "ok": False,
+                    "running": True,
+                    "error": "capture already running",
+                    **self.status(),
+                }
+            self._starting = True
+            try:
+                return self._start_impl(payload)
+            finally:
+                self._starting = False
+
+    def _start_impl(self, payload: Mapping) -> dict:
 
         runtime_mode = str(payload.get("runtime_mode", "teleop")).strip()
         if runtime_mode not in ALLOWED_RUNTIME_MODES:
@@ -134,12 +155,8 @@ class CaptureManager:
                 "running": False,
                 "error": f"runtime_mode must be one of {', '.join(ALLOWED_RUNTIME_MODES)}",
             }
-        if self.current_dataset_dir is not None and runtime_mode != self.current_runtime_mode:
-            return {"ok": False, "running": False,
-                    "error": "runtime_mode must match selected dataset mode"}
-
         if self.current_task_root is None:
-            self.new_task({"task": payload.get("task") or f"{runtime_mode}_segment"})
+            self._new_task_impl({"task": payload.get("task") or f"{runtime_mode}_segment"})
 
         task = self.current_task or _safe_task_name(payload.get("task") or f"{runtime_mode}_segment")
         task_root = self.current_task_root or self.root
@@ -156,7 +173,7 @@ class CaptureManager:
             return {"ok": False, "running": False, "error": str(exc)}
         self.current_task_annotation = annotation
         dataset_stage = str(payload.get("dataset_stage", "original")).strip() or "original"
-        dataset_dir = self.current_dataset_dir or task_root / dataset_stage / runtime_mode / "qpos_gripper"
+        dataset_dir = task_root / dataset_stage / runtime_mode / "qpos_gripper"
         command = self._command(
             payload, runtime_mode, task, dataset_stage, task_root, annotation
         )
@@ -178,6 +195,9 @@ class CaptureManager:
         )
         self.started_at = self.now()
         self.command = command
+        # A continued task may switch capture profiles, each with its own data directory.
+        self.current_dataset_dir = dataset_dir
+        self.current_runtime_mode = runtime_mode
         return {
             "ok": True,
             "running": True,
@@ -198,6 +218,16 @@ class CaptureManager:
 
     def stop(self) -> dict:
         """Stop the active collector process."""
+        with self._capture_lock:
+            if self._starting:
+                return {
+                    "ok": False,
+                    "running": True,
+                    "error": "capture start is still in progress",
+                }
+            return self._stop_impl()
+
+    def _stop_impl(self) -> dict:
         if not self._is_running():
             self._remember_stopped_episodes()
             self._close_log()
@@ -213,6 +243,28 @@ class CaptureManager:
         self._remember_stopped_episodes(status)
         self._close_log()
         return {"ok": True, **status}
+
+    def close(self) -> None:
+        """Release collector and export resources during dashboard shutdown."""
+        with self._capture_lock:
+            if self._starting:
+                # A start request may be inside Popen; do not race it. The
+                # caller can safely invoke close again after the request ends.
+                return
+            try:
+                self._stop_impl()
+            except Exception:
+                # Shutdown must continue even if a collector is already gone.
+                try:
+                    self._kill_process_tree()
+                    if self.process is not None:
+                        self.process.wait(timeout=1.0)
+                except Exception:
+                    pass
+                self._close_log()
+        export_thread = self._export_thread
+        if export_thread is not None and export_thread is not threading.current_thread():
+            export_thread.join(timeout=5.0)
 
     def annotate(self, payload: Mapping) -> dict:
         """Append one human outcome annotation for each episode from the last run."""
@@ -360,7 +412,12 @@ class CaptureManager:
             if self._export_status.get("job_id") != job_id:
                 return
             self._export_status.update({"status": "running", "started_at": self.now()})
-        result = self.export_lerobot(payload)
+        try:
+            result = self.export_lerobot(payload)
+        except Exception as exc:
+            # Keep asynchronous jobs observable when a converter/backend
+            # raises an exception outside the exporter's validation errors.
+            result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         with self._export_lock:
             if self._export_status.get("job_id") != job_id:
                 return

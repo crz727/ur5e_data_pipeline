@@ -63,6 +63,54 @@ def test_capture_manager_starts_hardware_qpos_collector_only(tmp_path):
     assert not any("pika_teleop" in part for part in command)
 
 
+def test_capture_manager_allows_only_one_concurrent_start(tmp_path):
+    calls = []
+    entered_popen = threading.Event()
+    release_popen = threading.Event()
+    processes = []
+    second_done = threading.Event()
+
+    def blocking_popen(command, **kwargs):
+        calls.append(command)
+        entered_popen.set()
+        assert release_popen.wait(timeout=2.0)
+        process = FakeProcess()
+        processes.append(process)
+        return process
+
+    manager = CaptureManager(root=tmp_path, popen=blocking_popen)
+    results = []
+
+    def start_capture():
+        results.append(manager.start({"runtime_mode": "teleop", "task": "concurrent"}))
+
+    first_thread = threading.Thread(target=start_capture)
+    first_thread.start()
+    assert entered_popen.wait(timeout=2.0)
+
+    def start_second_capture():
+        try:
+            start_capture()
+        finally:
+            second_done.set()
+
+    second_thread = threading.Thread(target=start_second_capture)
+    second_thread.start()
+    time.sleep(0.05)
+    assert not second_done.is_set()
+    release_popen.set()
+    first_thread.join(timeout=2.0)
+    second_thread.join(timeout=2.0)
+
+    assert len(calls) == 1
+    assert len(results) == 2
+    assert sum(result["ok"] for result in results) == 1
+    rejected = next(result for result in results if not result["ok"])
+    assert rejected["running"] is True
+    assert rejected["error"] == "capture already running"
+    assert len(processes) == 1
+
+
 def test_capture_manager_forwards_scene_camera_clock_overrides(tmp_path):
     calls = []
     manager = CaptureManager(
@@ -311,6 +359,18 @@ def test_capture_manager_stop_terminates_running_collector(tmp_path):
     assert manager.status()["running"] is False
 
 
+def test_capture_manager_close_stops_collector_and_is_idempotent(tmp_path):
+    process = FakeProcess()
+    manager = CaptureManager(root=tmp_path, popen=lambda *args, **kwargs: process)
+
+    manager.start({"runtime_mode": "teleop", "task": "shutdown"})
+    manager.close()
+    manager.close()
+
+    assert process.terminated is True
+    assert manager.status()["running"] is False
+
+
 def test_capture_manager_refuses_cleaning_while_capture_is_running(tmp_path):
     manager = CaptureManager(
         root=tmp_path,
@@ -492,6 +552,30 @@ def test_capture_manager_background_export_forwards_vla_profile(tmp_path):
     assert manager.lerobot_export_status()["status"] == "done"
 
 
+def test_capture_manager_marks_unexpected_background_export_errors_failed(tmp_path):
+    started = threading.Event()
+
+    def failing_converter(_dataset_dir, **_kwargs):
+        started.set()
+        raise KeyError("source frame field")
+
+    manager = CaptureManager(root=tmp_path, converter=failing_converter)
+    result = manager.start_lerobot_export({
+        "cleaned_dataset_dir": str(tmp_path / "cleaned"),
+        "output_dir": str(tmp_path / "lerobot"),
+    })
+
+    assert result["ok"] is True
+    assert started.wait(timeout=1.0)
+    for _ in range(100):
+        if manager.lerobot_export_status()["status"] == "failed":
+            break
+        time.sleep(0.01)
+    status = manager.lerobot_export_status()
+    assert status["status"] == "failed"
+    assert "source frame field" in status["error"]
+
+
 def test_capture_manager_preflights_vla_export_without_creating_output(tmp_path):
     cleaned_dataset_dir = tmp_path / "cleaned" / "teleop" / "qpos_gripper"
     metadata_path = cleaned_dataset_dir / "meta" / "episodes.jsonl"
@@ -645,7 +729,7 @@ def test_capture_manager_rejects_annotation_before_new_episode_is_stopped(tmp_pa
     assert invalid_outcome["ok"] is False
 
 
-def test_capture_manager_resumes_existing_dataset_without_overwriting_episodes(tmp_path):
+def test_capture_manager_continues_existing_task_root_in_a_different_capture_mode(tmp_path):
     dataset_dir = tmp_path / "old_task" / "original" / "teleop" / "qpos_gripper"
     metadata_path = dataset_dir / "meta" / "episodes.jsonl"
     metadata_path.parent.mkdir(parents=True)
@@ -665,13 +749,20 @@ def test_capture_manager_resumes_existing_dataset_without_overwriting_episodes(t
     assert manager.status()["dataset_dir"] == str(dataset_dir)
     started = manager.start({"runtime_mode": "teleop"})
     manager.stop()
-    mismatch = manager.start({"runtime_mode": "http"})
+    continued = manager.start({"runtime_mode": "http"})
+    manager.stop()
 
     assert selected["ok"] is True
     assert selected["task"] == "pick_block"
     assert started["dataset_dir"] == str(dataset_dir)
     assert "root:=" + str(tmp_path / "old_task") in calls[0]
-    assert mismatch["ok"] is False
-    assert "must match selected dataset mode" in mismatch["error"]
+    assert continued["ok"] is True
+    assert continued["task_root"] == str(tmp_path / "old_task")
+    assert continued["dataset_dir"] == str(
+        tmp_path / "old_task" / "original" / "http" / "qpos_gripper"
+    )
+    assert "root:=" + str(tmp_path / "old_task") in calls[1]
+    assert "runtime_mode:=http" in calls[1]
+    assert manager.status()["dataset_dir"] == continued["dataset_dir"]
     manager.new_task({"task": "new_task"})
     assert manager.start({"runtime_mode": "http"})["ok"] is True

@@ -36,6 +36,7 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "visual_layout->addWidget(camera_box, 3)" in main_window
     assert "capture_status_value_" in main_window
     assert "capture_toggle_button_" in main_window
+    assert "capture_stop_in_progress_" in main_window
     assert 'QStringLiteral("Start Capture")' in main_window
     assert 'QStringLiteral("Stop Capture")' in main_window
     capture_selector = main_window[main_window.index("capture_mode_->addItems"):
@@ -74,7 +75,9 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert '{QStringLiteral("max_sync_delta_s"), 0.02}' in main_window
     assert '{QStringLiteral("fps"), 15.0}' in main_window
     assert 'QStringLiteral("Capture could not start: %1")' in main_window
-    assert "connect(dialog, &QFileDialog::rejected" in main_window
+    assert "if (capture_stop_in_progress_)" in main_window
+    assert "!capture_stop_in_progress_ && !capture_annotation_in_progress_" in main_window
+    assert "connect(dialog, &QDialog::rejected" in main_window
     assert "show_temporary_capture_status" in main_window
     assert "language_editor_request_in_progress_" in main_window
     assert "if (capture_running_ || language_editor_request_in_progress_)" in main_window
@@ -138,7 +141,7 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "replay_timeline_dragging_" in main_window
     assert main_window.count("new QSlider(Qt::Horizontal") == 1
     assert "mode_status_layout->addRow" in main_window
-    assert "mode_box->setMinimumHeight(315);" in main_window
+    assert "mode_box->setMinimumHeight(420);" in main_window
     assert 'operation_column->setObjectName(QStringLiteral("operation_column"));' in main_window
     assert "robot_health_value_" in main_window
     assert "scene_camera_health_value_" in main_window
@@ -152,7 +155,7 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "root_layout->addWidget(replay_timeline_box);" in main_window
     assert "auto * mode_status_layout = new QFormLayout(mode_status_frame);" in main_window
     assert "auto * mode_buttons_layout = new QGridLayout(mode_actions_frame);" in main_window
-    assert "mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2, index % 2);" in main_window
+    assert "mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2 + 1, index % 2);" in main_window
     assert 'mode_status_frame->setObjectName(QStringLiteral("mode_status_panel"));' in main_window
     assert 'mode_status_frame->setStyleSheet(QStringLiteral("QFrame#mode_status_panel' in main_window
     assert "right_sidebar->setFrameShape(QFrame::NoFrame);" in main_window
@@ -209,7 +212,7 @@ def test_panel_launch_wires_safe_replay_tf_without_hardware_control():
     assert "ur5e_driver" not in launch_text
 
 
-def test_export_status_transport_failures_keep_workflow_guard_and_retry():
+def test_export_status_transport_failures_stop_after_bounded_retries():
     main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
         encoding="utf-8"
     )
@@ -226,12 +229,13 @@ def test_export_status_transport_failures_keep_workflow_guard_and_retry():
     )
     transient_branch = main_window[transient_start:transient_end]
 
-    assert "lerobot_export_in_progress_ = false" not in transient_branch
+    assert "lerobot_export_status_retry_count_" in transient_branch
+    assert "lerobot_export_in_progress_ = false" in transient_branch
     assert "QTimer::singleShot(1000" in transient_branch
     assert "request_lerobot_export_status" in transient_branch
     assert 'QStringLiteral("invalid backend response")' in transient_branch
     assert 'if (status == QStringLiteral("failed"))' in status_source
-    assert status_source.count("lerobot_export_in_progress_ = false") == 2
+    assert status_source.count("lerobot_export_in_progress_ = false") >= 3
     assert status_source.count("QTimer::singleShot(1000") == 2
 
 
@@ -245,6 +249,18 @@ def test_export_click_while_busy_reports_status_instead_of_silent_return():
     assert "if (lerobot_export_in_progress_)" in busy_guard
     assert "show_temporary_capture_status" in busy_guard
     assert "LeRobot export already running" in busy_guard
+
+
+def test_vla_export_confirmation_keeps_yes_left_of_no():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    preflight_start = main_window.index("void MainWindow::request_lerobot_export_preflight")
+    preflight_end = main_window.index("void MainWindow::start_lerobot_export", preflight_start)
+    preflight_method = main_window[preflight_start:preflight_end]
+
+    assert "QDialog vla_confirm_dialog" in preflight_method
+    assert "vla_confirm_buttons->addWidget(vla_confirm_yes);" in preflight_method
+    assert "vla_confirm_buttons->addWidget(vla_confirm_no);" in preflight_method
+    assert "QMessageBox::question" not in preflight_method
 
 
 def test_lerobot_export_uses_indeterminate_activity_indicator():
@@ -273,7 +289,7 @@ def test_lerobot_export_uses_indeterminate_activity_indicator():
     assert "lerobot_export_progress_->hide();" in main_window
     assert "set_lerobot_export_activity(true);" in start_method
     assert "set_lerobot_export_activity(false);" in start_method
-    assert status_method.count("set_lerobot_export_activity(false);") == 2
+    assert status_method.count("set_lerobot_export_activity(false);") >= 4
 
 
 def test_panel_control_services_manage_only_owned_api_and_mode_manager():
@@ -289,15 +305,25 @@ def test_panel_control_services_manage_only_owned_api_and_mode_manager():
     assert "qint64 control_api_pid_" in header
     assert "qint64 control_mode_manager_pid_" in header
     assert "QPushButton * control_services_button_" in header
+    assert "QPushButton * stop_control_services_button_" in header
     assert "void MainWindow::start_control_services()" in main_window
     assert "void MainWindow::stop_control_services()" in main_window
-    assert 'QStringLiteral("Start control services")' in main_window
-    assert 'QStringLiteral("Stop control services")' in main_window
+    assert "MainWindow::~MainWindow()" in main_window
+    assert "stop_process_synchronously(control_mode_manager_pid_)" in main_window
+    assert "stop_process_synchronously(control_api_pid_)" in main_window
+    assert "if (services_owned_)" in main_window
+    assert "const auto wait_for_exit" in main_window
+    assert 'QStringLiteral("Start")' in main_window
+    assert 'QStringLiteral("Stop")' in main_window
+    assert 'QStringLiteral("Pause")' in main_window
     assert 'QStringLiteral("ur5e_http_api")' in main_window
     assert 'QStringLiteral("run_api")' in main_window
     assert 'QStringLiteral("ur5e_mode_manager")' in main_window
     assert 'QStringLiteral("mode_manager")' in main_window
-    assert "QProcess::startDetached" in main_window
+    assert "qint64 start_owned_process" in main_window
+    assert "posix_spawnp" in main_window
+    assert "POSIX_SPAWN_SETSID" in main_window
+    assert "QProcess::startDetached" not in main_window
 
     stop_method = main_window[main_window.index("void MainWindow::stop_control_services()") :]
     lifecycle_source = main_window[main_window.index("void MainWindow::start_control_services()") :]
@@ -305,6 +331,46 @@ def test_panel_control_services_manage_only_owned_api_and_mode_manager():
     assert 'state == QStringLiteral("IDLE")' in main_window
     assert 'owner == QStringLiteral("none")' in main_window
     assert "services_owned_" in main_window
+    assert "QTimer * mode_status_stale_timer_" in header
+    assert "mode_status_stale_timer_->setSingleShot(true);" in main_window
+    assert "mode_status_stale_timer_->start(1500);" in main_window
+    assert "mode_status_received_ = false;" in main_window
+    assert "int owned_process_stop_attempts_" in header
+    assert "void request_process_stop(qint64 pid, int signal = SIGINT)" in main_window
+    assert "SIGTERM" in main_window
+    assert "SIGKILL" in main_window
+    assert "owned_process_stop_attempts_ == 30" in main_window
+    assert "owned_process_stop_attempts_ == 60" in main_window
+    assert "::kill(-static_cast<pid_t>(pid), signal)" in main_window
+    assert "waitpid(static_cast<pid_t>(pid), nullptr, WNOHANG)" in main_window
+    assert "control_services_state_ == ControlServicesState::WaitingForIdle" in main_window
+    assert "request_process_stop(control_mode_manager_pid_);" in main_window
+    assert "Forcing Mode Manager shutdown" in main_window
+
+    assert "QPushButton * hil_button_" in header
+    assert 'QStringLiteral("Hil_teleop")' in main_window
+    assert '{hil_button_, QStringLiteral("hil_teleop")}' in main_window
+    assert 'QStringLiteral("Start")' in main_window
+    assert 'QStringLiteral("Stop")' in main_window
+    assert "mode_buttons_layout->addWidget(control_services_button_, 0, 0);" in main_window
+    assert "mode_buttons_layout->addWidget(stop_control_services_button_, 0, 1);" in main_window
+    assert "mode_buttons_layout->addWidget(idle_button_, 3, 0, 1, 2);" in main_window
+    assert "mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2 + 1, index % 2);" in main_window
+    assert "stop_control_services_button_->setEnabled(true);" in main_window
+    assert "bool recover_residual_control_services();" in header
+    assert "ResidualControlServices find_residual_control_services()" in main_window
+    assert 'QStringLiteral("ur5e_mode_manager")' in main_window
+    assert 'QStringLiteral("ur5e_http_api")' in main_window
+    assert 'QStringLiteral("Recover Residual Services")' in main_window
+    assert "recover_residual_control_services()" in main_window
+    assert "recover_dialog_buttons->addWidget(recover_yes);" in main_window
+    assert "recover_dialog_buttons->addWidget(recover_no);" in main_window
+    assert "mode_buttons_layout->setColumnStretch(0, 1);" in main_window
+    assert "mode_buttons_layout->setColumnStretch(1, 1);" in main_window
+    assert "for (int row = 0; row < 4; ++row)" in main_window
+    assert "mode_actions_frame->setMinimumHeight(188);" in main_window
+    assert "mode_layout->addWidget(control_services_frame);" not in main_window
+    assert "mode_box->setMinimumHeight(420);" in main_window
 
     for forbidden_command in (
         'QStringLiteral("ur_robot_driver")',
@@ -317,14 +383,157 @@ def test_panel_control_services_manage_only_owned_api_and_mode_manager():
         assert forbidden_command not in lifecycle_source
 
 
+def test_control_service_start_failure_reuses_owned_process_cleanup_state_machine():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    failure_start = main_window.index("void MainWindow::fail_control_services_start")
+    failure_end = main_window.index("void MainWindow::finish_control_services_stop", failure_start)
+    failure_method = main_window[failure_start:failure_end]
+
+    assert "void finish_control_services_stop(const QString & status);" in header
+    assert "owned_process_stop_attempts_ = 0;" in failure_method
+    assert "control_services_state_ = ControlServicesState::StoppingModeManager;" in failure_method
+    assert "control_services_state_ = ControlServicesState::StoppingApi;" in failure_method
+    assert "check_owned_control_processes_stopped();" in failure_method
+    assert "control_api_pid_ = 0;" not in failure_method
+    assert "control_mode_manager_pid_ = 0;" not in failure_method
+    assert "finish_control_services_stop" in main_window
+
+
+def test_dashboard_state_polling_is_single_flight_and_network_requests_have_timeouts():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    state_start = main_window.index("void MainWindow::request_dashboard_state()")
+    state_end = main_window.index("void MainWindow::post_json", state_start)
+    state_method = main_window[state_start:state_end]
+
+    assert "bool dashboard_state_request_in_flight_" in header
+    assert "if (dashboard_state_request_in_flight_)" in state_method
+    assert "dashboard_state_request_in_flight_ = true;" in state_method
+    assert "dashboard_state_request_in_flight_ = false;" in state_method
+    assert "configure_network_request(request, 1500);" in state_method
+    assert "configure_network_request(request, 5000);" in main_window
+
+
+def test_mode_status_stale_does_not_leave_switch_buttons_disabled():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    stale_start = main_window.index("mode_status_stale_timer_ = new QTimer")
+    stale_end = main_window.index("update_control_services_button();", stale_start)
+    stale_callback = main_window[stale_start:stale_end]
+
+    assert "void set_mode_buttons_enabled(bool enabled);" in header
+    assert "set_mode_buttons_enabled(true);" in stale_callback
+    assert "set_mode_buttons_enabled(!switching);" in main_window
+
+
+def test_ros_executor_starts_before_rviz_and_camera_subscriptions_use_sensor_qos():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    ros_start = main_window.index("void MainWindow::initialize_ros()")
+    ros_end = main_window.index("void MainWindow::initialize_rviz()", ros_start)
+    ros_method = main_window[ros_start:ros_end]
+    rviz_start = ros_end
+    rviz_end = main_window.index("void MainWindow::update_camera", rviz_start)
+    rviz_method = main_window[rviz_start:rviz_end]
+
+    assert "rclcpp::SensorDataQoS()" in ros_method
+    assert "executor_thread_ = std::thread([this]() { executor_->spin(); });" in ros_method
+    assert "executor_thread_ = std::thread([this]() { executor_->spin(); });" not in rviz_method
+
+
+def test_rviz_initialization_failure_keeps_the_rest_of_the_ui_available():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    rviz_start = main_window.index("void MainWindow::initialize_rviz()")
+    rviz_end = main_window.index("void MainWindow::update_camera", rviz_start)
+    rviz_method = main_window[rviz_start:rviz_end]
+
+    assert "catch (const std::exception & error)" in rviz_method
+    assert 'QStringLiteral("RViz unavailable: %1")' in rviz_method
+    assert "rviz_frame_ = nullptr;" in rviz_method
+
+
 def test_panel_can_resume_original_data_and_convert_selected_cleaned_data():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
     main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
 
     assert 'QStringLiteral("Continue Dataset...")' in main_window
+    assert "capture_layout->addWidget(continue_dataset_button_, 3, 1);" in main_window
     assert 'QStringLiteral("/api/capture/select-existing-dataset")' in main_window
     assert "void MainWindow::request_existing_dataset()" in main_window
+    assert "void apply_existing_dataset_selection(const QJsonObject & capture);" in header
+    assert "void MainWindow::apply_existing_dataset_selection(const QJsonObject & capture)" in main_window
+    assert 'path == QStringLiteral("/api/capture/select-existing-dataset")' in main_window
+    assert "apply_existing_dataset_selection(response_object);" in main_window
+    assert 'QStringLiteral("Could not select dataset: %1")' in main_window
     assert 'QStringLiteral("Convert LeRobot...")' in main_window
     assert "void MainWindow::request_standalone_lerobot_export()" in main_window
     assert 'QStringLiteral("LeRobot Profile")' in main_window
     assert 'QStringLiteral("cleaned")' in main_window
     assert "request_lerobot_export(dataset_dir, profile.toLower())" in main_window
+
+
+def test_new_task_clears_selected_dataset_and_convert_waits_for_directory_confirmation():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+
+    assert "void clear_capture_dataset_selection();" in header
+    assert "void MainWindow::clear_capture_dataset_selection()" in main_window
+    assert 'path == QStringLiteral("/api/capture/new-task")' in main_window
+    assert "clear_capture_dataset_selection();" in main_window
+    assert "capture_dataset_path_.clear();" in main_window
+    assert 'QStringLiteral("Language: not set")' in main_window
+    assert main_window.count("QDialog::accepted") >= 2
+    assert "QTimer::singleShot(0, this" in main_window
+    assert "QMessageBox::warning" in main_window
+    assert 'QStringLiteral("Invalid Export Dataset")' in main_window
+
+
+def test_continued_dataset_locks_its_group_name_but_keeps_mode_and_language_editable():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+
+    assert "bool capture_task_id_is_suggested_" in header
+    assert "capture_task_->setEnabled(false);" in main_window
+    assert "capture_task_->setEnabled(true);" in main_window
+    assert "capture_mode_->setEnabled(!capture_running_);" in main_window
+    assert "capture_mode_->setEnabled(false);" not in main_window
+    assert "capture_mode_->setEnabled(!selected_existing && !capture_running_);" not in main_window
+    assert "capture_task_id_is_suggested_ =" in main_window
+    assert "capture_task_id_is_suggested_ ? capture_task_id_ : QString()" in main_window
+
+
+def test_language_editor_does_not_replace_unsaved_current_text_with_a_catalog_label():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+
+    editor_start = main_window.index("void MainWindow::show_language_instruction_editor")
+    editor_end = main_window.index("void MainWindow::update_capture_toggle()", editor_start)
+    editor = main_window[editor_start:editor_end]
+
+    assert editor.index("if (!capture_task_id_.isEmpty())") < editor.index(
+        "connect(task_id, &QComboBox::currentTextChanged"
+    )
+
+
+def test_dashboard_refresh_preserves_a_new_language_label_for_a_continued_dataset():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+
+    assert "bool continued_dataset_annotation_dirty_" in header
+    assert "continued_dataset_annotation_dirty_ = true;" in main_window
+    assert "continued_dataset_annotation_dirty_ = false;" in main_window
+    assert "selected_existing && !capture_running_ && capture_task_->isEnabled() &&" in main_window
+    assert "!continued_dataset_annotation_dirty_" in main_window

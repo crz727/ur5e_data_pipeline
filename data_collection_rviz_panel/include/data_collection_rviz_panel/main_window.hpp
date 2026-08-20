@@ -66,6 +66,8 @@ private:
   void update_capture_toggle();
   void show_temporary_capture_status(const QString & status);
   void post_json(const QString & path, const QJsonObject & payload);
+  void clear_capture_dataset_selection();
+  void apply_existing_dataset_selection(const QJsonObject & capture);
   void update_dashboard_state(const QJsonObject & state);
   void update_camera(QLabel * label, const sensor_msgs::msg::CompressedImage & image);
   void request_mode(const QString & mode);
@@ -73,12 +75,15 @@ private:
   void request_standalone_lerobot_export();
   void start_control_services();
   void stop_control_services();
+  bool recover_residual_control_services();
   void check_control_api_health();
   void start_control_mode_manager();
   void stop_owned_mode_manager();
   void stop_owned_control_api();
   void check_owned_control_processes_stopped();
   void fail_control_services_start(const QString & reason);
+  void finish_control_services_stop(const QString & status);
+  void set_mode_buttons_enabled(bool enabled);
   void update_control_services_button();
   void handle_control_services_timeout();
 
@@ -117,6 +122,7 @@ private:
   QNetworkAccessManager * network_{nullptr};
   QTimer * state_timer_{nullptr};
   QTimer * control_services_timeout_timer_{nullptr};
+  QTimer * mode_status_stale_timer_{nullptr};
   qint64 control_api_pid_{0};
   qint64 control_mode_manager_pid_{0};
   QLabel * connection_label_{nullptr};
@@ -144,7 +150,9 @@ private:
   QPushButton * auto_button_{nullptr};
   QPushButton * api_button_{nullptr};
   QPushButton * teleop_button_{nullptr};
+  QPushButton * hil_button_{nullptr};
   QPushButton * control_services_button_{nullptr};
+  QPushButton * stop_control_services_button_{nullptr};
   QComboBox * capture_mode_{nullptr};
   QLineEdit * capture_task_{nullptr};
   QLineEdit * replay_dataset_path_{nullptr};
@@ -180,12 +188,18 @@ private:
   bool replay_mode_active_{false};
   bool replay_timeline_dragging_{false};
   bool cleaning_in_progress_{false};
+  bool capture_stop_in_progress_{false};
   bool capture_annotation_in_progress_{false};
   bool lerobot_export_in_progress_{false};
   bool language_editor_request_in_progress_{false};
+  bool capture_task_id_is_suggested_{false};
+  bool continued_dataset_annotation_dirty_{false};
   bool capture_status_override_active_{false};
   bool services_owned_{false};
   bool mode_status_received_{false};
+  bool dashboard_state_request_in_flight_{false};
+  int owned_process_stop_attempts_{0};
+  int lerobot_export_status_retry_count_{0};
   int capture_status_override_generation_{0};
   ControlServicesState control_services_state_{ControlServicesState::Stopped};
 };

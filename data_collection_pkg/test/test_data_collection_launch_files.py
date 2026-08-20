@@ -158,3 +158,13 @@ def test_monitor_launch_uses_real_robot_active_window():
     assert 'DeclareLaunchArgument("active_age_s", default_value="2.0")' in launch_text
     assert "/camera2/scene_camera/color/image_raw/compressed" in launch_text
     assert "/camera1/wrist_camera/color/image_raw/compressed" in launch_text
+
+
+def test_qt_panel_exit_shuts_down_included_dashboard_launch():
+    panel_root = Path(__file__).resolve().parents[2] / "data_collection_rviz_panel"
+    launch_text = (panel_root / "launch" / "data_collection_rviz_panel.launch.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Shutdown" in launch_text
+    assert "on_exit=Shutdown(" in launch_text

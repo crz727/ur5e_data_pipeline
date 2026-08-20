@@ -4,7 +4,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Shutdown
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
@@ -94,5 +94,6 @@ def generate_launch_description():
             package="data_collection_rviz_panel",
             executable="data_collection_rviz_panel",
             output="screen",
+            on_exit=Shutdown(reason="Qt data collection panel exited"),
         ),
     ])
