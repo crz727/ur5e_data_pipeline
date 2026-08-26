@@ -28,6 +28,14 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert 'QStringLiteral("Replay RobotModel"), false)' in main_window
     assert "live_model_->setEnabled(!replay_mode)" in main_window
     assert "replay_model_->setEnabled(replay_mode)" in main_window
+    assert "replay_box_" in main_window
+    assert "live_robot_active_" in main_window
+    assert "set_replay_blocked" in main_window
+    assert 'QStringLiteral("/api/replay/stop")' in main_window
+    assert 'QStringLiteral("Replay disabled: live robot topics active")' in main_window
+    assert "scene_camera_active" in main_window
+    assert "wrist_camera_active" in main_window
+    assert "if (replay_mode_active_)" in main_window
     assert "executor_->add_node(rviz_node_->get_raw_node())" not in main_window
     assert "findChildren<QDockWidget *>" in main_window
     assert "rviz_frame_->menuBar()->hide()" in main_window
@@ -210,6 +218,20 @@ def test_panel_launch_wires_safe_replay_tf_without_hardware_control():
     assert '"robot_description": live_description' in launch_text
     assert '("joint_states", "/data_collection/robot_model/joint_states")' in launch_text
     assert "ur5e_driver" not in launch_text
+
+
+def test_replay_is_blocked_by_live_topics_and_camera_callbacks_are_guarded():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    camera_start = main_window.index("external_camera_subscription_")
+    camera_end = main_window.index("executor_ =", camera_start)
+    camera_subscriptions = main_window[camera_start:camera_end]
+
+    assert "const bool live_robot_active = joint_active || scene_camera_active || wrist_camera_active;" in main_window
+    assert "set_replay_blocked(live_robot_active" in main_window
+    assert camera_subscriptions.count("if (replay_mode_active_)") == 2
+    update_camera_start = main_window.index("void MainWindow::update_camera")
+    update_camera_end = main_window.index("void MainWindow::request_dashboard_state", update_camera_start)
+    assert "if (replay_mode_active_)" in main_window[update_camera_start:update_camera_end]
 
 
 def test_export_status_transport_failures_stop_after_bounded_retries():
