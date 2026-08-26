@@ -10,7 +10,8 @@ reused without the original `ur5e_http_api` control/API package. It contains:
 - Offline quality gates for `basic`, `trainable`, and `replay` profiles.
 - Optional official LeRobotDataset conversion and LeRobot/Rerun visualization.
 - Realtime topology and data-flow monitor.
-- Read-only Web dashboard for integration visibility.
+- Flask Dashboard API backend for the Qt/RViz panel, plus an optional
+  compatibility browser page.
 - Simulation-safe replay publisher plus URSim/RViz adapter.
 - Data-pipeline unit tests and manual real-robot validation docs.
 
@@ -87,6 +88,10 @@ ros2 run data_collection_pkg data_collection_collector_node --ros-args \
   -p root:=/tmp/ur5e_datasets \
   -p task:=teleop_pick
 ```
+
+The command above and `data_collection_teleop_ur_ros2.launch.py` are retained
+as compatibility paths for action-triggered teleop datasets. They are not the
+default path for new ACT/VLA demonstrations.
 
 Start `teleop_ur_ros2` recording from the independent teleop data bridge:
 
@@ -180,13 +185,29 @@ The dashboard is a data-collection workbench. It can start and stop only the
 fixed-rate hardware qpos collector, writing to:
 
 ```text
-original/policy/qpos_gripper
 original/teleop/qpos_gripper
 original/http/qpos_gripper
+original/act/qpos_gripper
+original/vla/qpos_gripper
 ```
 
 It does not start robot drivers, HTTP control, teleoperation, or policy
 execution.
+
+## Compatibility and Reserved Entrypoints
+
+The following items are intentionally retained and marked rather than removed:
+
+| Item | Status | Scope |
+| --- | --- | --- |
+| `web_dashboard.py` `/` page | Compatibility browser UI | Qt uses the `/api/...` routes; the browser page is optional. |
+| `data_collection_http_api.launch.py` | Legacy HTTP event audit | Collects `http_api_action`, `delta_ee_pose`, and `auto_grasp` events; it is separate from the current `http` capture profile. |
+| `data_collection_teleop_ur_ros2.launch.py` | Legacy action-triggered teleop | Keeps `teleop_twist_gripper` data compatibility. |
+| `data_collection_teleop_demo_qpos.launch.py` | Older qpos launch | Retained for historical scripts; new captures use `data_collection_hardware_qpos.launch.py`. |
+| `teleop_bridge_node` | Reserved action-collection entry point | Placeholder for a future action-triggered bridge; it does not replace the current fixed-rate collector. |
+
+These entries remain packaged so historical datasets and deployment scripts do
+not break. They should not be selected for the standard Qt capture workflow.
 
 Start simulation-safe replay:
 
@@ -222,10 +243,13 @@ trainable/teleop/twist_gripper
 For ACT-style demonstration learning, prefer fixed-rate hardware qpos capture:
 
 ```text
-original/policy/qpos_gripper
 original/teleop/qpos_gripper
 original/http/qpos_gripper
+original/act/qpos_gripper
+original/vla/qpos_gripper
 ```
+
+`original/policy/qpos_gripper` is a historical compatibility directory only.
 
 This mode requires:
 

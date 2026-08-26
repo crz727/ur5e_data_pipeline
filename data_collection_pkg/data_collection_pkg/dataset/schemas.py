@@ -26,6 +26,9 @@ class ActionSchema:
 
 
 SCHEMAS: Dict[str, ActionSchema] = {
+    # Historical default directory is preserved for old callers. Current
+    # hardware captures pass dataset_stage/runtime_mode explicitly and write
+    # original/<mode>/qpos_gripper instead.
     "qpos_gripper": ActionSchema(
         name="qpos_gripper",
         category="trainable",
@@ -42,6 +45,7 @@ SCHEMAS: Dict[str, ActionSchema] = {
         ),
         action_dim=7,
     ),
+    # Compatibility schemas for action-triggered teleop and HTTP event audit.
     "teleop_servo_l_pose": ActionSchema(
         name="teleop_servo_l_pose",
         category="trainable",

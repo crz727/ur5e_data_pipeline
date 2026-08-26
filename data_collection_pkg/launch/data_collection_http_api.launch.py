@@ -1,3 +1,10 @@
+"""Compatibility launch for HTTP control-event audit collectors.
+
+This is not the current ``runtime_mode:=http`` fixed-rate capture entry point.
+It records legacy ``http_api_action``, ``delta_ee_pose`` and ``auto_grasp``
+events when the corresponding external topics are available.
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration

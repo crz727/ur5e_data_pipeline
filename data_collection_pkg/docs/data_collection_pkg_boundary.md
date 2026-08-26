@@ -58,6 +58,9 @@ topics and serves a read-only browser dashboard. It displays topology, flow,
 quality, drop reason, and replay status. It must not publish control commands,
 modify ROS2 topics, or make safety decisions.
 
+The browser page is a compatibility client. The supported operator client is
+the Qt/RViz panel, which uses the Dashboard HTTP API routes.
+
 It does not read data from HTTP.
 
 All reusable data-pipeline code is kept under `data_collection_pkg`:
@@ -73,7 +76,7 @@ data_collection_pkg/
   ros_capture/
     collector_node.py
     quality_monitor_node.py
-    teleop_bridge_node.py
+    teleop_bridge_node.py       # reserved action-collection entry point
 
   action_replay/
     replay_simulator.py
@@ -110,10 +113,14 @@ debug
 Original hardware-state qpos datasets:
 
 ```text
-original/policy/qpos_gripper
 original/teleop/qpos_gripper
 original/http/qpos_gripper
+original/act/qpos_gripper
+original/vla/qpos_gripper
 ```
+
+`original/policy/qpos_gripper` remains readable for historical compatibility;
+new capture requests use `act` or `vla` instead.
 
 Cleaned trainable qpos datasets:
 

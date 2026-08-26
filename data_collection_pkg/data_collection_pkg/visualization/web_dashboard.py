@@ -1,4 +1,10 @@
-"""Read-only Web dashboard for data collection visualization."""
+"""Flask API backend and optional legacy browser dashboard.
+
+The ``/api/...`` endpoints are the supported integration boundary used by the
+Qt/RViz panel. The HTML returned by ``/`` is retained as a compatibility
+browser UI; it is not required by the Qt workflow and is not the primary
+operator interface.
+"""
 
 import json
 import threading
@@ -230,6 +236,7 @@ def create_dashboard_app(store: DashboardStateStore, capture_manager=None) -> Fl
 
     @app.get("/")
     def index() -> Response:
+        # Compatibility-only browser UI. Qt uses the API routes below.
         return Response(_dashboard_html(), mimetype="text/html")
 
     @app.get("/api/state")
