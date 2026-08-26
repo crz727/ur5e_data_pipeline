@@ -986,7 +986,8 @@ void MainWindow::build_ui()
     &MainWindow::request_standalone_lerobot_export);
   operation_layout->addWidget(capture_box);
 
-  auto * replay_box = new QGroupBox(QStringLiteral("Episode Replay (read-only)"), operation_column);
+  replay_box_ = new QGroupBox(QStringLiteral("Episode Replay (read-only)"), operation_column);
+  auto * replay_box = replay_box_;
   auto * replay_layout = new QGridLayout(replay_box);
   replay_dataset_path_ = new QLineEdit(replay_box);
   replay_episode_ = new QComboBox(replay_box);
@@ -1036,6 +1037,10 @@ void MainWindow::build_ui()
   connect(load, &QPushButton::clicked, this, &MainWindow::request_replay_episodes);
   connect(replay_dataset_path_, &QLineEdit::editingFinished, this, &MainWindow::request_replay_episodes);
   connect(replay_button_, &QPushButton::clicked, this, [this]() {
+    if (live_robot_active_) {
+      replay_status_value_->setText(QStringLiteral("Replay disabled: live robot topics active"));
+      return;
+    }
     if (replay_episode_->currentIndex() < 0) {
       replay_status_value_->setText(QStringLiteral("Load an episode before replaying"));
       return;
@@ -1188,10 +1193,20 @@ void MainWindow::initialize_ros()
     });
   external_camera_subscription_ = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
     kExternalCameraTopic, rclcpp::SensorDataQoS(),
-    [this](const sensor_msgs::msg::CompressedImage::SharedPtr message) { update_camera(external_camera_label_, *message); });
+    [this](const sensor_msgs::msg::CompressedImage::SharedPtr message) {
+      if (replay_mode_active_) {
+        return;
+      }
+      update_camera(external_camera_label_, *message);
+    });
   wrist_camera_subscription_ = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
     kWristCameraTopic, rclcpp::SensorDataQoS(),
-    [this](const sensor_msgs::msg::CompressedImage::SharedPtr message) { update_camera(wrist_camera_label_, *message); });
+    [this](const sensor_msgs::msg::CompressedImage::SharedPtr message) {
+      if (replay_mode_active_) {
+        return;
+      }
+      update_camera(wrist_camera_label_, *message);
+    });
 
   executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   executor_->add_node(node_);
@@ -1255,7 +1270,10 @@ void MainWindow::update_camera(QLabel * label, const sensor_msgs::msg::Compresse
   QImage decoded;
   decoded.loadFromData(encoded);
   if (decoded.isNull()) { return; }
-  QMetaObject::invokeMethod(this, [label, decoded]() {
+  QMetaObject::invokeMethod(this, [this, label, decoded]() {
+    if (replay_mode_active_) {
+      return;
+    }
     label->setPixmap(QPixmap::fromImage(decoded).scaled(label->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
   }, Qt::QueuedConnection);
 }
@@ -2083,6 +2101,36 @@ void MainWindow::request_replay_seek(int frame_index)
     {QStringLiteral("frame_index"), frame_index}});
 }
 
+void MainWindow::set_replay_blocked(bool blocked, const QString & reason)
+{
+  if (live_robot_active_ == blocked && (!blocked || replay_box_ == nullptr || !replay_box_->isEnabled())) {
+    return;
+  }
+  live_robot_active_ = blocked;
+  if (blocked) {
+    if ((replay_mode_active_ || last_replay_status_name_ == QStringLiteral("running") ||
+      last_replay_status_name_ == QStringLiteral("paused")) && !replay_stop_requested_for_live_robot_)
+    {
+      replay_stop_requested_for_live_robot_ = true;
+      post_json(QStringLiteral("/api/replay/stop"), {});
+    }
+    if (replay_box_ != nullptr) {
+      replay_box_->setEnabled(false);
+    }
+    if (replay_timeline_ != nullptr) {
+      replay_timeline_->setEnabled(false);
+    }
+    if (replay_status_value_ != nullptr) {
+      replay_status_value_->setText(reason);
+    }
+  } else {
+    replay_stop_requested_for_live_robot_ = false;
+    if (replay_box_ != nullptr) {
+      replay_box_->setEnabled(true);
+    }
+  }
+}
+
 void MainWindow::update_dashboard_state(const QJsonObject & state)
 {
   const QJsonObject capture = state.value(QStringLiteral("capture_status")).toObject();
@@ -2139,8 +2187,16 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
   const QJsonObject cameras = state.value(QStringLiteral("cameras")).toObject();
   const QJsonObject joint_flow = flow.value(QStringLiteral("topics")).toObject().value(
     QStringLiteral("/joint_states")).toObject();
+  const QJsonObject flow_topics = flow.value(QStringLiteral("topics")).toObject();
+  const QJsonObject scene_camera_flow = flow_topics.value(
+    QStringLiteral("/camera2/scene_camera/color/image_raw/compressed")).toObject();
+  const QJsonObject wrist_camera_flow = flow_topics.value(
+    QStringLiteral("/camera1/wrist_camera/color/image_raw/compressed")).toObject();
   const bool joint_seen = joint_flow.value(QStringLiteral("seen")).toBool(false);
   const bool joint_active = joint_flow.value(QStringLiteral("active")).toBool(false);
+  const bool scene_camera_active = scene_camera_flow.value(QStringLiteral("active")).toBool(false);
+  const bool wrist_camera_active = wrist_camera_flow.value(QStringLiteral("active")).toBool(false);
+  const bool live_robot_active = joint_active || scene_camera_active || wrist_camera_active;
   const double joint_age = joint_flow.value(QStringLiteral("age_s")).toDouble(-1.0);
   const QString joint_detail = joint_active ?
     QStringLiteral("active · %1 s").arg(joint_age, 0, 'f', 2) :
@@ -2188,10 +2244,12 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
   const double replay_start_timestamp = replay_status.value(QStringLiteral("start_timestamp")).toDouble(-1.0);
   const bool replay_running = replay_status_name == QStringLiteral("running");
   const bool replay_paused = replay_status_name == QStringLiteral("paused");
+  set_replay_blocked(live_robot_active, live_robot_active ?
+    QStringLiteral("Replay disabled: live robot topics active") : QString());
   replay_pause_button_->setEnabled(replay_running);
   replay_resume_button_->setEnabled(replay_paused);
   replay_stop_button_->setEnabled(replay_running || replay_paused);
-  const bool timeline_enabled = (replay_running || replay_paused) && replay_frame_count > 0;
+  const bool timeline_enabled = !live_robot_active && (replay_running || replay_paused) && replay_frame_count > 0;
   replay_timeline_->setEnabled(timeline_enabled);
   {
     const QSignalBlocker blocker(replay_timeline_);

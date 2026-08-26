@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <thread>
 
@@ -16,6 +17,7 @@
 
 class QComboBox;
 class QDoubleSpinBox;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QNetworkAccessManager;
@@ -63,6 +65,7 @@ private:
   void request_lerobot_export_status();
   void set_lerobot_export_activity(bool active);
   void request_replay_seek(int frame_index);
+  void set_replay_blocked(bool blocked, const QString & reason);
   void update_capture_toggle();
   void show_temporary_capture_status(const QString & status);
   void post_json(const QString & path, const QJsonObject & payload);
@@ -156,6 +159,7 @@ private:
   QComboBox * capture_mode_{nullptr};
   QLineEdit * capture_task_{nullptr};
   QLineEdit * replay_dataset_path_{nullptr};
+  QGroupBox * replay_box_{nullptr};
   QComboBox * replay_episode_{nullptr};
   QDoubleSpinBox * replay_rate_{nullptr};
   QSlider * replay_timeline_{nullptr};
@@ -185,7 +189,9 @@ private:
   QString capture_language_instruction_zh_;
   QString lerobot_export_profile_{QStringLiteral("act")};
   bool capture_running_{false};
-  bool replay_mode_active_{false};
+  std::atomic_bool replay_mode_active_{false};
+  bool live_robot_active_{false};
+  bool replay_stop_requested_for_live_robot_{false};
   bool replay_timeline_dragging_{false};
   bool cleaning_in_progress_{false};
   bool capture_stop_in_progress_{false};
