@@ -20,7 +20,9 @@ jobs:
         run: |
           apt-get update
           apt-get install -y python3-pytest python3-flask python3-numpy \
+            python3-pil python3-requests python3-pip \
             python3-colcon-common-extensions ros-humble-xacro
+          python3 -m pip install --no-cache-dir --disable-pip-version-check pyarrow
 
       - name: Build packages
         shell: bash

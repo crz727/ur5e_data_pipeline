@@ -3,3 +3,4 @@ flask
 numpy
 pillow
 requests
+pyarrow
