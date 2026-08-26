@@ -18,7 +18,7 @@ def test_launch_and_hardware_defaults_use_neutral_gripper_topic():
 
 def test_user_docs_do_not_reference_removed_teleop_dataset_paths():
     files = [
-        ROOT / "README.md",
+        ROOT.parent / "README.md",
     ]
 
     for path in files:

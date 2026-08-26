@@ -167,7 +167,7 @@ cd ..
 colcon build --packages-select data_collection_rviz_panel
 ```
 
-ROS 2 真机验证应在目标机器上确认硬件话题、模式切换、采集、标注、清洗、LeRobot 导出和回放的完整链路。两个包的 README 提供各自的命令和边界说明。
+ROS 2 真机验证应在目标机器上确认硬件话题、模式切换、采集、标注、清洗、LeRobot 导出和回放的完整链路；本 README 是仓库级统一入口。
 
 ## 版本和提交
 
