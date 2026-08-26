@@ -20,8 +20,8 @@ setup(
     ],
     install_requires=["setuptools", "flask", "numpy"],
     zip_safe=True,
-    maintainer="hjy",
-    maintainer_email="hjy@todo.todo",
+    maintainer="陈润泽",
+    maintainer_email="1762638741@qq.com",
     description="Reusable ROS2 data collection, validation, visualization, LeRobot export, and replay package for UR5e workflows.",
     license="Apache-2.0",
     extras_require={

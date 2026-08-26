@@ -30,15 +30,15 @@ jobs:
             data_collection_pkg data_collection_rviz_panel
 
       - name: Run Python tests
+        working-directory: data_collection_pkg
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q \
-            data_collection_pkg/test
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q test
 
       - name: Run Qt contract tests
+        working-directory: data_collection_rviz_panel
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q \
-            data_collection_rviz_panel/test
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q test
