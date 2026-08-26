@@ -17,11 +17,6 @@ setup(
             "launch/data_collection_teleop_demo_qpos.launch.py",
             "launch/data_collection_replay.launch.py",
         ]),
-        ("share/" + package_name + "/docs", [
-            "docs/data_collection_pkg_boundary.md",
-            "docs/ros2_manual_verification.md",
-            "docs/REAL_ROBOT_VALIDATION.md",
-        ]),
     ],
     install_requires=["setuptools", "flask", "numpy"],
     zip_safe=True,

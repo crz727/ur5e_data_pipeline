@@ -21,7 +21,6 @@ reused without the original `ur5e_http_api` control/API package. It contains:
 data_collection_pkg/
   data_collection_pkg/      Python source
   launch/                   monitor and replay launch files
-  docs/                     package boundary and validation guides
   test/                     data-pipeline tests
   package.xml               ROS2 package manifest
   setup.py                  ament_python entry points
@@ -281,12 +280,9 @@ the canonical data schema itself changes.
 
 ## Validation
 
-For full real-machine integration, follow:
-
-```text
-docs/REAL_ROBOT_VALIDATION.md
-docs/ros2_manual_verification.md
-```
+For the cross-package build, startup sequence, runtime topics, and real-machine
+workflow, use the repository-level `README.md`. This package README focuses on
+the Python pipeline commands and parameters.
 
 For local Python checks without ROS2:
 

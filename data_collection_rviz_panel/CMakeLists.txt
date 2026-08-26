@@ -29,7 +29,6 @@ ament_target_dependencies(data_collection_rviz_panel
 
 install(TARGETS data_collection_rviz_panel DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
-install(DIRECTORY docs DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
