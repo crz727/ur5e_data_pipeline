@@ -2,6 +2,8 @@
 
 这是一个面向 UR5e 机器人的 ROS 2 数据采集与回放工作区，交付内容由两个相互配合的包组成：
 
+本项目由陈润泽独立完成，面向机器人学习数据工程、ROS 2 系统集成和可复现实验流程。仓库展示的是可运行的研究型工程原型，而不是完整的商用机器人控制栈。
+
 | 包 | 作用 | 技术栈 |
 | --- | --- | --- |
 | `data_collection_pkg` | 采集、同步、质量检查、清洗、标注、LeRobot 转换、Dashboard 后端和安全回放 | Python、ROS 2 |
@@ -21,6 +23,39 @@ data_collection_rviz_panel/   C++ Qt/RViz2 操作面板包
 ```
 
 仓库不包含 `build/`、`install/`、`log/` 等构建产物，也不包含开发计划和临时项目文档。
+
+## 项目亮点
+
+- 以场景相机 `header.stamp` 为采样锚点，统一匹配腕部相机、关节和夹爪状态。
+- 将采集分类与控制模式解耦，支持 `teleop`、`http`、`act`、`vla` 四类数据目录。
+- 提供原始数据标注、质量门禁、清洗审计和 LeRobot v3 ACT/VLA 导出链路。
+- 使用独立的回放话题和 `replay/` TF 前缀，避免向真机控制器发送命令。
+- Qt/RViz 面板通过 Dashboard API 和模式管理器协同工作，实时话题 active 时自动保护回放。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+  H[UR5e 驱动 / 相机 / 夹爪] --> C[数据采集器]
+  C --> O[original qpos_gripper]
+  O --> Q[质量检查与人工标注]
+  Q --> K[cleaned 数据集]
+  K --> L[LeRobot v3 ACT / VLA]
+  D[Dashboard API] <--> U[Qt/RViz 面板]
+  U <--> M[独立模式管理器]
+  K --> R[只读回放控制器]
+  R --> U
+```
+
+## 界面与演示
+
+下面的截图来自 Qt/RViz 操作面板，展示了模式控制、采集、回放时间轴、相机画面、遥测曲线和健康状态：
+
+![Qt/RViz 操作面板](assets/ui_buttons.png)
+
+![实时遥测与模式管理器状态](assets/ui_status.png)
+
+仓库不直接提交真机演示视频和数据集，以控制仓库体积并避免暴露运行环境信息。
 
 ## 环境依赖
 
@@ -136,6 +171,23 @@ ros2 run data_collection_pkg data_collection clean-original \
 
 回放只发布 `/data_collection/replay/joint_states`，并使用 `replay/` TF 前缀；它不会向真实控制器写入命令。Qt 面板检测到实时 `/joint_states` 或相机话题 active 时会禁用 Replay，正在回放时检测到实时话题会请求停止回放，避免真实状态和回放画面互相覆盖。
 
+## 实验结果
+
+以下是当前真机链路的实测基线，用于说明同步设计和系统边界：
+
+| 指标 | 结果 |
+| --- | --- |
+| 相机发布频率 | 约 29.97--29.99 Hz |
+| 采集频率 | 15 Hz |
+| 场景相机接收延迟 | 约 34--39 ms，典型值约 37 ms |
+| 腕部相机接收延迟 | 约 30--37 ms，典型值约 35 ms |
+| 场景相机-腕部相机容差 | 20 ms |
+| 相机-关节状态容差 | 20 ms |
+| 相机-夹爪状态容差 | 30 ms |
+| LeRobot 导出 | LeRobot v3，ACT/VLA 两种配置 |
+
+相机接收延迟是稳定的链路延迟，不作为拒帧条件；同步使用相机 header 时间和状态缓冲区完成。夹爪当前为 `std_msgs/msg/Int8`，只能用接收时间参与匹配，因此保留较宽的 30 ms 容差。
+
 ## 关键接口
 
 | 接口 | 用途 |
@@ -168,6 +220,28 @@ colcon build --packages-select data_collection_rviz_panel
 ```
 
 ROS 2 真机验证应在目标机器上确认硬件话题、模式切换、采集、标注、清洗、LeRobot 导出和回放的完整链路；本 README 是仓库级统一入口。
+
+## 个人贡献
+
+本项目由陈润泽独立完成，主要工作包括：
+
+- 设计并实现 ROS 2 固定频率 qpos 数据采集、相机时间锚定和多 topic 同步；
+- 实现 JSONL 数据集写入、质量检查、清洗审计、episode 标注和续采目录管理；
+- 实现 LeRobot v3 ACT/VLA 导出、预检、进度状态和失败重试；
+- 实现 Qt5/RViz2 操作面板、Dashboard API 对接和模式管理器状态展示；
+- 设计安全回放话题、TF 隔离和真机实时话题检测，避免回放覆盖或控制真机；
+- 编写 Python 单元测试、Qt 契约测试、ROS 2 构建入口和跨机器部署说明。
+
+## 已知限制
+
+- 真机驱动、相机驱动、夹爪驱动、UR 描述包和模式管理器不包含在本仓库中。
+- Qt 面板不能替代独立控制器，也不负责 ACT/VLA 推理。
+- 无 `header.stamp` 的夹爪消息只能按接收时间近似同步。
+- GitHub Actions 只验证无硬件环境下的构建和软件测试；真机安全和时序验证必须在目标设备上完成。
+
+## 版本
+
+当前公开版本为 `v0.1.0`，对应首个可运行的 ROS 2 数据采集、清洗、LeRobot 导出和安全回放链路。详细变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 版本和提交
 

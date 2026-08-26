@@ -3,7 +3,7 @@
   <name>data_collection_rviz_panel</name>
   <version>0.1.0</version>
   <description>Native Qt and RViz2 console for UR5e data collection.</description>
-  <maintainer email="hjy@todo.todo">hjy</maintainer>
+  <maintainer email="1762638741@qq.com">陈润泽</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
