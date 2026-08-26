@@ -4,7 +4,10 @@ import time
 from pathlib import Path
 
 from data_collection_pkg.dataset import task_annotations
-from data_collection_pkg.visualization.capture_manager import CaptureManager
+from data_collection_pkg.visualization.capture_manager import CaptureManager, _timestamp_label
+
+
+FIXED_TIMESTAMP = _timestamp_label(1785488195.0)
 
 
 class FakeProcess:
@@ -297,8 +300,8 @@ def test_capture_manager_new_task_creates_current_task_folder(tmp_path):
 
     assert result["ok"] is True
     assert result["task"] == "pick_red_block"
-    assert result["task_root"] == str(tmp_path / "pick_red_block_20260731_165635")
-    assert (tmp_path / "pick_red_block_20260731_165635").is_dir()
+    assert result["task_root"] == str(tmp_path / f"pick_red_block_{FIXED_TIMESTAMP}")
+    assert (tmp_path / f"pick_red_block_{FIXED_TIMESTAMP}").is_dir()
     assert manager.status()["task_root"] == result["task_root"]
 
 
@@ -318,7 +321,7 @@ def test_capture_manager_start_uses_current_task_folder_as_root(tmp_path):
     assert start_result["task_root"] == task_result["task_root"]
     assert f"root:={task_result['task_root']}" in command
     assert start_result["dataset_dir"] == str(
-        tmp_path / "pick_red_block_20260731_165635" / "original" / "teleop" / "qpos_gripper"
+        tmp_path / f"pick_red_block_{FIXED_TIMESTAMP}" / "original" / "teleop" / "qpos_gripper"
     )
 
 
@@ -334,7 +337,7 @@ def test_capture_manager_start_creates_task_folder_when_missing(tmp_path):
     result = manager.start({"runtime_mode": "http", "task": "http pick"})
 
     assert result["ok"] is True
-    assert result["task_root"] == str(tmp_path / "http_pick_20260731_165635")
+    assert result["task_root"] == str(tmp_path / f"http_pick_{FIXED_TIMESTAMP}")
     assert f"root:={result['task_root']}" in calls[0][0]
 
 
@@ -633,7 +636,7 @@ def test_capture_manager_annotates_only_episodes_added_by_completed_capture(tmp_
         now=lambda: 1785488195.0,
     )
     dataset_dir = (
-        tmp_path / "pick_20260731_165635" / "original" / "teleop" / "qpos_gripper"
+        tmp_path / f"pick_{FIXED_TIMESTAMP}" / "original" / "teleop" / "qpos_gripper"
     )
     metadata_path = dataset_dir / "meta" / "episodes.jsonl"
     metadata_path.parent.mkdir(parents=True)
@@ -694,7 +697,7 @@ def test_capture_manager_preserves_stopped_annotation_when_next_capture_starts(t
 
 def test_capture_manager_snapshots_episode_indices_before_starting_collector(tmp_path):
     dataset_dir = (
-        tmp_path / "pick_20260731_165635" / "original" / "teleop" / "qpos_gripper"
+        tmp_path / f"pick_{FIXED_TIMESTAMP}" / "original" / "teleop" / "qpos_gripper"
     )
     metadata_path = dataset_dir / "meta" / "episodes.jsonl"
     metadata_path.parent.mkdir(parents=True)
