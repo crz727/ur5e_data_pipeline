@@ -51,6 +51,14 @@ def test_capture_sync_defaults_separate_camera_joint_and_gripper_tolerances():
 
 
 def test_panel_mode_topics_and_mode_manager_runtime_contract_match():
+    panel_source = (
+        SRC_ROOT / "data_collection_rviz_panel" / "src" / "main_window.cpp"
+    ).read_text(encoding="utf-8")
+    for topic in ("/control_mode/request", "/control_mode", "/control_mode/status"):
+        assert topic in panel_source
+    for mode in ("idle", "auto", "api", "teleop"):
+        assert mode in panel_source
+
     external_sources = (
         SRC_ROOT / "ur5e_mode_manager" / "ur5e_mode_manager" / "mode_manager.py",
         SRC_ROOT / "ur5e_http_api" / "ur5e_http_api" / "ros_controller.py",
@@ -60,9 +68,6 @@ def test_panel_mode_topics_and_mode_manager_runtime_contract_match():
     if not all(path.is_file() for path in external_sources):
         pytest.skip("external mode-manager and HTTP API packages are not in this checkout")
 
-    panel_source = (
-        SRC_ROOT / "data_collection_rviz_panel" / "src" / "main_window.cpp"
-    ).read_text(encoding="utf-8")
     mode_manager_source = (
         SRC_ROOT / "ur5e_mode_manager" / "ur5e_mode_manager" / "mode_manager.py"
     ).read_text(encoding="utf-8")
@@ -74,7 +79,6 @@ def test_panel_mode_topics_and_mode_manager_runtime_contract_match():
     ).read_text(encoding="utf-8")
 
     for topic in ("/control_mode/request", "/control_mode", "/control_mode/status"):
-        assert topic in panel_source
         assert topic in mode_manager_source
     for mode in ("idle", "auto", "api", "teleop"):
         assert mode in panel_source
