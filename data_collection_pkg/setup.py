@@ -18,7 +18,7 @@ setup(
             "launch/data_collection_replay.launch.py",
         ]),
     ],
-    install_requires=["setuptools", "flask", "numpy"],
+    install_requires=["setuptools", "flask", "numpy", "h5py", "pillow"],
     zip_safe=True,
     maintainer="陈润泽",
     maintainer_email="1762638741@qq.com",
@@ -27,6 +27,7 @@ setup(
     extras_require={
         "test": ["pytest"],
         "lerobot": ["lerobot"],
+        "hdf5": ["h5py", "pillow"],
     },
     entry_points={
         "console_scripts": [

@@ -375,6 +375,25 @@ def create_dashboard_app(store: DashboardStateStore, capture_manager=None) -> Fl
         result = capture_manager.preflight_lerobot_export(payload)
         return jsonify(result), 200 if result.get("ok") else 409
 
+    @app.post("/api/capture/export/preflight")
+    def api_capture_export_preflight():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 409
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, Mapping):
+            return jsonify({"ok": False, "error": "preflight payload must be a JSON object"}), 409
+        fmt = str(payload.get("format", "")).strip().lower()
+        if fmt == "hdf5":
+            cleaned = str(payload.get("cleaned_dataset_dir", "")).strip()
+            output = str(payload.get("output_path", "")).strip()
+            if not cleaned or not output:
+                return jsonify({"ok": False, "error": "cleaned_dataset_dir and output_path are required"}), 409
+            return jsonify({"ok": True, "format": "hdf5", "cleaned_dataset_dir": cleaned, "output_path": output}), 200
+        if fmt in {"act", "vla"}:
+            result = capture_manager.preflight_lerobot_export({**dict(payload), "profile": fmt})
+            return jsonify({"format": fmt, **result}), 200 if result.get("ok") else 409
+        return jsonify({"ok": False, "error": "format must be act, vla, or hdf5"}), 409
+
     @app.post("/api/capture/export-lerobot")
     def api_capture_export_lerobot():
         if capture_manager is None:
@@ -382,8 +401,21 @@ def create_dashboard_app(store: DashboardStateStore, capture_manager=None) -> Fl
         result = capture_manager.start_lerobot_export(request.get_json(silent=True) or {})
         return jsonify(result), 202 if result.get("ok") else 409
 
+    @app.post("/api/capture/export")
+    def api_capture_export():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 404
+        result = capture_manager.start_export(request.get_json(silent=True) or {})
+        return jsonify(result), 202 if result.get("ok") else 409
+
     @app.get("/api/capture/export-lerobot/status")
     def api_capture_export_lerobot_status():
+        if capture_manager is None:
+            return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 404
+        return jsonify(capture_manager.lerobot_export_status())
+
+    @app.get("/api/capture/export/status")
+    def api_capture_export_status():
         if capture_manager is None:
             return jsonify({"ok": False, "available": False, "error": "capture controls disabled"}), 404
         return jsonify(capture_manager.lerobot_export_status())

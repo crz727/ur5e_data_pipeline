@@ -161,6 +161,22 @@ def test_cli_lerobot_viz_invokes_launcher(tmp_path, monkeypatch, capsys):
     assert calls[0].episode_index == 3
 
 
+def test_cli_convert_hdf5_dispatches_to_hdf5_converter(tmp_path, monkeypatch, capsys):
+    calls = []
+
+    def fake_convert(dataset_dir, output_path):
+        calls.append((dataset_dir, output_path))
+        return {"ok": True, "output_path": str(output_path), "episode_count": 1}
+
+    monkeypatch.setattr("data_collection_pkg.cli.convert_jsonl_to_hdf5", fake_convert)
+    assert main([
+        "convert", str(tmp_path / "cleaned"), "--format", "hdf5",
+        "--output-path", str(tmp_path / "export.hdf5"),
+    ]) == 0
+    assert calls == [(tmp_path / "cleaned", tmp_path / "export.hdf5")]
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+
 def test_cli_quality_check_accepts_trainable_profile_options(tmp_path, capsys):
     actions = tmp_path / "actions.jsonl"
     observations = tmp_path / "observations.jsonl"

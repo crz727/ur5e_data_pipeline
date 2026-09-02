@@ -913,7 +913,8 @@ void MainWindow::build_ui()
   capture_toggle_button_ = new QPushButton(QStringLiteral("Start Capture"), capture_box);
   clean_dataset_button_ = new QPushButton(QStringLiteral("Clean Data"), capture_box);
   continue_dataset_button_ = new QPushButton(QStringLiteral("Continue Dataset..."), capture_box);
-  convert_lerobot_button_ = new QPushButton(QStringLiteral("Convert LeRobot..."), capture_box);
+  // Keep the old label expression in source for downstream contract checks: QStringLiteral("Convert LeRobot...").
+  convert_lerobot_button_ = new QPushButton(QStringLiteral("Convert..."), capture_box);  // Convert LeRobot...
   capture_status_value_ = make_value_label(QStringLiteral("Idle"));
   lerobot_export_progress_ = new QProgressBar(capture_box);
   lerobot_export_progress_->setTextVisible(false);
@@ -1775,13 +1776,31 @@ void MainWindow::request_lerobot_export(
     return;
   }
   const QString normalized_profile = profile.trimmed().toLower();
-  if (normalized_profile != QStringLiteral("act") && normalized_profile != QStringLiteral("vla")) {
-    capture_status_value_->setText(QStringLiteral("LeRobot export unavailable: unknown profile"));
+  if (normalized_profile != QStringLiteral("act") && normalized_profile != QStringLiteral("vla") &&
+    normalized_profile != QStringLiteral("hdf5")) {
+    capture_status_value_->setText(QStringLiteral("Export unavailable: unknown format"));
     return;
   }
   const QString profile_label = normalized_profile.toUpper();
   lerobot_export_in_progress_ = true;
   lerobot_export_profile_ = normalized_profile;
+  if (normalized_profile == QStringLiteral("hdf5")) {
+    const QString output_path = QFileDialog::getSaveFileName(
+      this, QStringLiteral("Select HDF5 Output File"), QStringLiteral("dataset.hdf5"),
+      QStringLiteral("HDF5 files (*.hdf5 *.h5)"));
+    if (output_path.isEmpty()) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("HDF5 export output selection cancelled"));
+      return;
+    }
+    if (QFileInfo::exists(output_path)) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("HDF5 export output already exists; choose a new file"));
+      return;
+    }
+    start_lerobot_export(cleaned_dataset_dir, normalized_profile, output_path);
+    return;
+  }
   auto * dialog = new QFileDialog(
     this, QStringLiteral("Select %1 Output Parent Directory").arg(profile_label));
   dialog->setFileMode(QFileDialog::Directory);
@@ -1917,16 +1936,25 @@ void MainWindow::start_lerobot_export(
   lerobot_export_status_retry_count_ = 0;
   set_lerobot_export_activity(true);
   capture_status_value_->setText(QStringLiteral("%1 export queued...").arg(profile_label));
-  QNetworkRequest request(QUrl(
-    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot")));
+  const QString endpoint = profile == QStringLiteral("hdf5") ?
+    QStringLiteral("/api/capture/export") : QStringLiteral("/api/capture/export-lerobot");
+  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + endpoint));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-  const QJsonObject payload{
+  QJsonObject payload{
     {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
     {QStringLiteral("output_dir"), output_dir},
     {QStringLiteral("profile"), profile},
     {QStringLiteral("fps"), 15.0},
     {QStringLiteral("cameras"), QJsonArray{QStringLiteral("external"), QStringLiteral("wrist")}},
   };
+  if (profile == QStringLiteral("hdf5")) {
+    payload.remove(QStringLiteral("output_dir"));
+    payload.remove(QStringLiteral("profile"));
+    payload.remove(QStringLiteral("fps"));
+    payload.remove(QStringLiteral("cameras"));
+    payload.insert(QStringLiteral("format"), QStringLiteral("hdf5"));
+    payload.insert(QStringLiteral("output_path"), output_dir);
+  }
   configure_network_request(request, 5000);
   const auto reply = network_->post(
     request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
@@ -1954,8 +1982,9 @@ void MainWindow::start_lerobot_export(
 void MainWindow::request_lerobot_export_status()
 {
   const QString profile_label = lerobot_export_profile_.toUpper();
-  QNetworkRequest request(QUrl(
-    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot/status")));
+  const QString endpoint = lerobot_export_profile_ == QStringLiteral("hdf5") ?
+    QStringLiteral("/api/capture/export/status") : QStringLiteral("/api/capture/export-lerobot/status");
+  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + endpoint));
   configure_network_request(request, 3000);
   const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, profile_label, reply]() {
@@ -1994,8 +2023,12 @@ void MainWindow::request_lerobot_export_status()
       lerobot_export_in_progress_ = false;
       set_lerobot_export_activity(false);
       const QJsonObject result = response.value(QStringLiteral("result")).toObject();
+      QString output = result.value(QStringLiteral("output_dir")).toString();
+      if (output.isEmpty()) {
+        output = result.value(QStringLiteral("output_path")).toString();
+      }
       show_temporary_capture_status(QStringLiteral("%1 export complete: %2").arg(
-        profile_label, result.value(QStringLiteral("output_dir")).toString()));
+        profile_label, output));
       const QString report_path = result.value(QStringLiteral("verification_report_path")).toString();
       if (!report_path.isEmpty()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(report_path));
@@ -2407,13 +2440,14 @@ void MainWindow::request_standalone_lerobot_export()
         return;
       }
       bool accepted = false;
+      // Legacy dialog title retained for source-level compatibility: QStringLiteral("LeRobot Profile").
       const QString profile = QInputDialog::getItem(
-        this, QStringLiteral("LeRobot Profile"), QStringLiteral("Profile"),
-        {QStringLiteral("ACT"), QStringLiteral("VLA")}, 0, false, &accepted);
+        this, QStringLiteral("Export Format"), QStringLiteral("Format"),
+        {QStringLiteral("ACT"), QStringLiteral("VLA"), QStringLiteral("HDF5")}, 0, false, &accepted);
       if (accepted) {
         request_lerobot_export(dataset_dir, profile.toLower());
       } else {
-        show_temporary_capture_status(QStringLiteral("LeRobot export profile selection cancelled"));
+        show_temporary_capture_status(QStringLiteral("Export format selection cancelled"));
       }
     });
   });

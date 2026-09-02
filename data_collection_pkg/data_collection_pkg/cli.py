@@ -8,6 +8,7 @@ from typing import Optional, Sequence
 from data_collection_pkg.action_replay.replay_simulator import simulate_episode
 from data_collection_pkg.dataset.cleaner import CleaningConfig, clean_original_dataset
 from data_collection_pkg.dataset.converter import convert_jsonl_to_lerobot
+from data_collection_pkg.dataset.hdf5_converter import convert_jsonl_to_hdf5
 from data_collection_pkg.dataset.jsonl_writer import JsonlDatasetWriter
 from data_collection_pkg.dataset.lerobot_viz import LeRobotVizConfig, run_lerobot_viz
 from data_collection_pkg.dataset.quality import QualityConfig, check_dataset
@@ -77,6 +78,19 @@ def _build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--camera", action="append", default=[])
     convert.add_argument("--visual-storage", choices=("video", "image"), default="video")
     convert.add_argument("--video-codec", default="h264")
+
+    generic_convert = subparsers.add_parser(
+        "convert", help="Convert a cleaned dataset to ACT, VLA, or project HDF5 v1"
+    )
+    generic_convert.add_argument("dataset_dir")
+    generic_convert.add_argument("--format", choices=("act", "vla", "hdf5"), required=True)
+    generic_convert.add_argument("--output-path", required=True)
+    generic_convert.add_argument("--repo-id")
+    generic_convert.add_argument("--fps", type=float, default=15.0)
+    generic_convert.add_argument("--robot-type", default="ur5e")
+    generic_convert.add_argument("--camera", action="append", default=[])
+    generic_convert.add_argument("--visual-storage", choices=("video", "image"), default="video")
+    generic_convert.add_argument("--video-codec", default="h264")
 
     viz = subparsers.add_parser(
         "lerobot-viz",
@@ -171,6 +185,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             visual_storage=args.visual_storage,
             video_codec=args.video_codec,
         )
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0
+
+    if args.command == "convert":
+        dataset_dir = Path(args.dataset_dir)
+        if args.format == "hdf5":
+            summary = convert_jsonl_to_hdf5(dataset_dir, Path(args.output_path))
+        else:
+            summary = convert_jsonl_to_lerobot(
+                dataset_dir,
+                output_dir=Path(args.output_path),
+                repo_id=args.repo_id,
+                profile=args.format,
+                fps=args.fps,
+                robot_type=args.robot_type,
+                cameras=tuple(_camera_mapping(value) for value in args.camera),
+                visual_storage=args.visual_storage,
+                video_codec=args.video_codec,
+            )
         print(json.dumps(summary, ensure_ascii=False))
         return 0
 

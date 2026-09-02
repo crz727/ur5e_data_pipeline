@@ -28,7 +28,7 @@ data_collection_rviz_panel/   C++ Qt/RViz2 操作面板包
 
 - 以场景相机 `header.stamp` 为采样锚点，统一匹配腕部相机、关节和夹爪状态。
 - 将采集分类与控制模式解耦，支持 `teleop`、`http`、`act`、`vla` 四类数据目录。
-- 提供原始数据标注、质量门禁、清洗审计和 LeRobot v3 ACT/VLA 导出链路。
+- 提供原始数据标注、质量门禁、清洗审计、LeRobot v3 ACT/VLA 导出和项目自定义 HDF5 v1 交换格式。
 - 使用独立的回放话题和 `replay/` TF 前缀，避免向真机控制器发送命令。
 - Qt/RViz 面板通过 Dashboard API 和模式管理器协同工作，实时话题 active 时自动保护回放。
 
@@ -50,6 +50,8 @@ flowchart LR
 ## 界面与演示
 
 下面的截图来自 Qt/RViz 操作面板，展示了模式控制、采集、回放时间轴、相机画面、遥测曲线和健康状态：
+
+完整的产品手册见 [`docs/UI_USER_MANUAL.md`](docs/UI_USER_MANUAL.md)，其中包含所有按钮、状态输出、采集/清洗/转换/回放流程、接口话题和故障排查说明。
 
 ![Qt/RViz 操作面板](assets/ui_buttons.png)
 
@@ -156,6 +158,7 @@ original/<runtime_mode>/qpos_gripper
 - 标注 episode 成功或失败；
 - 从原始数据生成 `cleaned/<runtime_mode>/qpos_gripper`；
 - 选择 ACT 或 VLA 配置导出 LeRobot v3 数据集；
+- 选择 HDF5 导出项目自定义 HDF5 v1 单文件（不宣称兼容任意训练框架）；
 - 在回放栏加载 episode、暂停、继续、停止和拖动时间轴。
 
 也可以使用命令行执行质量检查和清洗：
@@ -167,6 +170,10 @@ ros2 run data_collection_pkg data_collection quality-check \
 
 ros2 run data_collection_pkg data_collection clean-original \
   datasets/ur5e/original/teleop/qpos_gripper
+
+ros2 run data_collection_pkg data_collection convert \
+  datasets/ur5e/cleaned/teleop/qpos_gripper \
+  --format hdf5 --output-path exports/teleop.hdf5
 ```
 
 回放只发布 `/data_collection/replay/joint_states`，并使用 `replay/` TF 前缀；它不会向真实控制器写入命令。Qt 面板检测到实时 `/joint_states` 或相机话题 active 时会禁用 Replay，正在回放时检测到实时话题会请求停止回放，避免真实状态和回放画面互相覆盖。
@@ -196,6 +203,7 @@ ros2 run data_collection_pkg data_collection clean-original \
 | `/api/capture/start`、`/api/capture/stop` | 启停固定频率采集器 |
 | `/api/capture/clean` | 清洗原始数据 |
 | `/api/capture/export-lerobot` | 导出 ACT/VLA LeRobot 数据集 |
+| `/api/capture/export` | 按 `format=act|vla|hdf5` 异步导出 |
 | `/api/replay/start`、`/api/replay/pause`、`/api/replay/resume`、`/api/replay/stop` | 回放控制 |
 | `/control_mode/request` | 请求控制模式切换 |
 | `/control_mode/status` | 接收模式管理器状态 |
