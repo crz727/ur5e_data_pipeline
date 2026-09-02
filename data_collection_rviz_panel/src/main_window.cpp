@@ -1793,12 +1793,17 @@ void MainWindow::request_lerobot_export(
       show_temporary_capture_status(QStringLiteral("HDF5 export output selection cancelled"));
       return;
     }
-    if (QFileInfo::exists(output_path)) {
+    QString normalized_output_path = output_path;
+    const QString suffix = QFileInfo(normalized_output_path).suffix().toLower();
+    if (suffix != QStringLiteral("h5") && suffix != QStringLiteral("hdf5")) {
+      normalized_output_path += QStringLiteral(".hdf5");
+    }
+    if (QFileInfo::exists(normalized_output_path)) {
       lerobot_export_in_progress_ = false;
       show_temporary_capture_status(QStringLiteral("HDF5 export output already exists; choose a new file"));
       return;
     }
-    start_lerobot_export(cleaned_dataset_dir, normalized_profile, output_path);
+    start_lerobot_export(cleaned_dataset_dir, normalized_profile, normalized_output_path);
     return;
   }
   auto * dialog = new QFileDialog(
