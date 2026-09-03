@@ -195,7 +195,7 @@ HIL 场景下，先在外部控制器准备完成后点击 `AUTO`，需要人工
 | `Start Capture` / `Stop Capture` | 启动或停止固定频率采集 |
 | `Clean Data` | 对当前原始数据执行质量清洗 |
 | `Continue Dataset...` | 选择已有原始数据集并继续追加 episode |
-| `Convert LeRobot...` | 单独选择 cleaned 数据集并导出 ACT 或 VLA |
+| `Convert...` | 单独选择 cleaned 数据集并导出 ACT、VLA 或 HDF5 |
 | `Write status` | 显示 Idle、采集、清洗、标注或错误信息 |
 | `Dataset Path` | 显示当前选中的数据集目录 |
 
@@ -316,22 +316,21 @@ fps_tolerance_ratio = 0.5
 
 1. 点击 `Convert...`，选择 `ACT`、`VLA` 或 `HDF5`。
 2. 选择 cleaned `qpos_gripper` 数据集，必须包含 `meta/episodes.jsonl`。
-3. 选择输出父目录和输出目录名。
-4. 选择 `ACT` 或 `VLA`。
-5. ACT 直接进入异步导出；VLA 先显示 preflight 结果。
-6. VLA 确认 eligible/skipped episode 和计划报告后开始导出。
-7. 观察状态文字和不确定进度条；完成或失败后进度条停止。
+3. ACT/VLA 选择输出父目录和输出目录名；HDF5 直接选择输出文件，文件名不带扩展名时 UI 自动补充 `.hdf5`。
+4. ACT 直接进入异步导出；VLA 先显示 preflight 结果；HDF5 检查输入元数据后进入异步导出。
+5. VLA 确认 eligible/skipped episode 和计划报告后开始导出。
+6. 观察状态文字和不确定进度条；完成或失败后进度条停止。
 
 ACT/VLA 输出 LeRobot v3 目录；HDF5 输出项目自定义 HDF5 v1 单文件，包含 state/action、时间戳、双路 RGB 图像、episode 索引和语言元数据，不宣称兼容任意训练框架。转换状态使用 `queued`、`running`、`done`、`failed`，不伪造百分比。典型文字：
 
 ```text
-ACT export queued...
-ACT export running...
-ACT export complete: ...
-ACT export failed: ...
+HDF5 export queued...
+HDF5 export running...
+HDF5 export complete: ...
+HDF5 export failed: ...
 ```
 
-VLA 需要有效语言标注；没有语言的 episode 会在 preflight 中列为 skipped。ACT 与 VLA 使用同一 LeRobot v3 输出结构，后续验证和回放接口不因 profile 改变。
+VLA 需要有效语言标注；没有语言的 episode 会在 preflight 中列为 skipped。ACT 与 VLA 使用同一 LeRobot v3 输出结构，HDF5 使用项目自定义 HDF5 v1 结构。HDF5 不是任意训练框架的通用输入，使用前应确认下游读取器按本项目 schema 读取。
 
 ### 13.2 独立 API 对照
 
@@ -342,6 +341,8 @@ VLA 需要有效语言标注；没有语言的 episode 会在 preflight 中列�
 | `GET /api/capture/export-lerobot/status` | 查询转换状态 |
 | `POST /api/capture/export` | 按 `format=act|vla|hdf5` 启动通用异步转换 |
 | `GET /api/capture/export/status` | 查询通用转换状态 |
+
+HDF5 输出至少包含 `meta/episode_index`、`meta/episode_lengths`、`meta/episode_ends`、`meta/tasks/*`，以及每个 episode 下的 `observations/state`、`actions`、`timestamps`、`frame_index`、`observations/images/top` 和 `observations/images/wrist`。完成转换后应使用项目校验器确认 `ok=true` 且 `issues=[]`。
 
 若转换长时间停在某个 episode，应查看 Write status、Dashboard 日志和输出目录中的计划/错误报告；不要同时启动第二个同目录转换。
 
@@ -530,7 +531,7 @@ Start Capture → 执行动作 → Stop Capture
         ↓
 Clean Data → 检查 Quality/Drop Reason
         ↓
-Convert LeRobot → ACT 或 VLA preflight/导出
+Convert → ACT、VLA 或 HDF5 导出
         ↓
 停止 live publisher 后 Load → Replay（只读）
 ```

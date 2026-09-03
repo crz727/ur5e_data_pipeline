@@ -51,7 +51,7 @@ flowchart LR
 
 下面的截图来自 Qt/RViz 操作面板，展示了模式控制、采集、回放时间轴、相机画面、遥测曲线和健康状态：
 
-完整的产品手册见 [`docs/UI_USER_MANUAL.md`](docs/UI_USER_MANUAL.md)，其中包含所有按钮、状态输出、采集/清洗/转换/回放流程、接口话题和故障排查说明。
+完整的产品手册见 [`docs/UI_USER_MANUAL.md`](docs/UI_USER_MANUAL.md)，其中包含所有按钮、状态输出、采集/清洗/转换/回放流程、接口话题和故障排查说明。HDF5 格式、schema 和验证方法见 [`docs/HDF5_CONVERSION_GUIDE.md`](docs/HDF5_CONVERSION_GUIDE.md)。
 
 ![Qt/RViz 操作面板](assets/ui_buttons.png)
 
@@ -176,6 +176,8 @@ ros2 run data_collection_pkg data_collection convert \
   --format hdf5 --output-path exports/teleop.hdf5
 ```
 
+HDF5 转换只接受 `cleaned/<mode>/qpos_gripper`，输出路径必须以 `.h5` 或 `.hdf5` 结尾，已有输出文件不会覆盖。转换器逐帧解码外部图像并流式写入，完成后可用 `verify_hdf5_export` 检查 schema、episode 数量和字段长度。
+
 回放只发布 `/data_collection/replay/joint_states`，并使用 `replay/` TF 前缀；它不会向真实控制器写入命令。Qt 面板检测到实时 `/joint_states` 或相机话题 active 时会禁用 Replay，正在回放时检测到实时话题会请求停止回放，避免真实状态和回放画面互相覆盖。
 
 ## 实验结果
@@ -204,6 +206,7 @@ ros2 run data_collection_pkg data_collection convert \
 | `/api/capture/clean` | 清洗原始数据 |
 | `/api/capture/export-lerobot` | 导出 ACT/VLA LeRobot 数据集 |
 | `/api/capture/export` | 按 `format=act|vla|hdf5` 异步导出 |
+| `/api/capture/export/preflight` | 检查通用导出参数；HDF5 检查输入和输出路径 |
 | `/api/replay/start`、`/api/replay/pause`、`/api/replay/resume`、`/api/replay/stop` | 回放控制 |
 | `/control_mode/request` | 请求控制模式切换 |
 | `/control_mode/status` | 接收模式管理器状态 |
