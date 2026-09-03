@@ -704,7 +704,7 @@ void MainWindow::build_ui()
   auto * capture_box = new QGroupBox(QStringLiteral("Capture"), operation_column);
   auto * capture_layout = new QGridLayout(capture_box);
   capture_mode_ = new QComboBox(capture_box);
-  capture_mode_->addItems({QStringLiteral("teleop"), QStringLiteral("http"), QStringLiteral("policy")});
+  capture_mode_->addItems({QStringLiteral("teleop"), QStringLiteral("http"), QStringLiteral("act"), QStringLiteral("vla")});
   capture_task_ = new QLineEdit(QStringLiteral("teleop_segment_01"), capture_box);
   dataset_path_value_ = make_value_label(QStringLiteral("Dataset Path -"));
   auto * new_task = new QPushButton(QStringLiteral("New Task"), capture_box);

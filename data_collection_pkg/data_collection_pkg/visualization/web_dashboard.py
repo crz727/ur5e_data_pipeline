@@ -701,7 +701,8 @@ def _dashboard_html() -> str:
           <select id="captureMode">
             <option value="teleop">teleop</option>
             <option value="http">http</option>
-            <option value="policy">policy</option>
+            <option value="act">act</option>
+            <option value="vla">vla</option>
           </select>
         </label>
         <label>Task Name
