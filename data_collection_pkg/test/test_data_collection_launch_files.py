@@ -64,12 +64,27 @@ def test_hardware_qpos_collection_launch_is_packaged_and_fixed_rate():
     assert '"dataset_stage": LaunchConfiguration("dataset_stage")' in launch_text
     assert '"dataset_schema": "qpos_gripper"' in launch_text
     assert 'DeclareLaunchArgument("sample_rate_hz", default_value="15.0")' in launch_text
+    assert 'DeclareLaunchArgument("gripper_state_topic", default_value="/binary_gripper_state")' in launch_text
+    assert 'DeclareLaunchArgument("gripper_state_msg_type", default_value="std_msgs.msg:Int8")' in launch_text
     assert 'DeclareLaunchArgument("max_sync_delta_s", default_value="0.07")' in launch_text
     assert 'DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.07")' in launch_text
     assert "action_topic" not in launch_text
     assert "launch/data_collection_hardware_qpos.launch.py" in setup_path.read_text(
         encoding="utf-8"
     )
+
+
+def test_hardware_qpos_launch_defaults_are_binary_gripper_topic(monkeypatch):
+    description, argument_type, _ = _load_hardware_qpos_launch_description(monkeypatch)
+
+    declared = {
+        entity.name: entity.default_value
+        for entity in description.entities
+        if isinstance(entity, argument_type)
+    }
+
+    assert declared["gripper_state_topic"] == "/binary_gripper_state"
+    assert declared["gripper_state_msg_type"] == "std_msgs.msg:Int8"
 
 
 def test_hardware_qpos_launch_declares_and_forwards_task_language_parameters(monkeypatch):

@@ -55,8 +55,8 @@ interfaces only:
 ```bash
 ros2 run data_collection_pkg hardware_interface_check --ros-args \
   -p timeout_s:=3.0 \
-  -p gripper_state_topic:=/gripper/state \
-  -p gripper_state_msg_type:=std_msgs.msg:Float64MultiArray \
+  -p gripper_state_topic:=/binary_gripper_state \
+  -p gripper_state_msg_type:=std_msgs.msg:Int8 \
   -p require_cameras:=false
 ```
 
@@ -106,8 +106,7 @@ ros2 launch data_collection_pkg data_collection_hardware_qpos.launch.py \
   task:=teleop_pick_place_demo \
   dataset_stage:=original \
   runtime_mode:=teleop \
-  sample_rate_hz:=15.0 \
-  gripper_state_topic:=/gripper/state
+  sample_rate_hz:=15.0
 ```
 
 Use `runtime_mode:=teleop`, `runtime_mode:=http`, `runtime_mode:=act`, or
@@ -120,6 +119,13 @@ action space matches ACT-style `[q1, q2, q3, q4, q5, q6, gripper]` policies.
 Bridge or HTTP action events are not required for this path. Existing
 `original/policy/qpos_gripper` datasets remain readable for historical replay
 and export, but new capture requests should use `act` or `vla`.
+
+The hardware qpos launch defaults to `/binary_gripper_state`
+(`std_msgs.msg:Int8`) and stores its `0/1` value as the seventh state/action
+dimension. Override both `gripper_state_topic` and `gripper_state_msg_type`
+together when using another hardware interface. The Qt/RViz model display may
+continue to use `/robotiq_2f_gripper/joint_states` (`JointState`); that topic
+is a separate visualization input and is not the fixed-rate collector default.
 
 Task and language annotations are optional at collector startup. The dashboard
 omits empty `task_id`, English, and Chinese launch arguments so a no-language

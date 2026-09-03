@@ -122,6 +122,14 @@ def test_gripper_safety_and_camera_adapters_build_payloads():
     }
 
 
+def test_gripper_adapter_preserves_binary_int8_state():
+    closed = gripper_sample(SimpleNamespace(data=1), timestamp=1.0)
+    open_ = gripper_sample(SimpleNamespace(data=0), timestamp=1.1)
+
+    assert closed.payload == {"gripper": 1.0}
+    assert open_.payload == {"gripper": 0.0}
+
+
 def test_compressed_image_adapter_preserves_jpeg_transport_without_raw_dimensions():
     camera = camera_sample(
         SimpleNamespace(

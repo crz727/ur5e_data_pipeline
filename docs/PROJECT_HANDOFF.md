@@ -53,6 +53,11 @@ outside this ownership boundary. Preserve them and avoid unrelated refactors.
   LeRobot dataset.
 - Current capture defaults are 15 Hz, camera synchronization tolerance `0.07 s`,
   and robot-state synchronization tolerance `0.07 s`.
+- The fixed-rate hardware collector defaults to `/binary_gripper_state`
+  (`std_msgs.msg:Int8`) and stores its `0/1` value directly as the seventh
+  qpos/gripper state and action dimension. The legacy
+  `/robotiq_2f_gripper/joint_states` publisher remains the Qt/RViz model input
+  and is not replaced by the collector default.
 
 ### Annotation And Cleaning
 
