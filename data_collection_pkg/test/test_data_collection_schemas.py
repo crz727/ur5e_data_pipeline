@@ -31,6 +31,22 @@ def test_qpos_schema_can_be_staged_by_runtime_mode():
     assert (
         dataset_relative_dir(
             "qpos_gripper",
+            dataset_stage="original",
+            runtime_mode="act",
+        )
+        == "original/act/qpos_gripper"
+    )
+    assert (
+        dataset_relative_dir(
+            "qpos_gripper",
+            dataset_stage="original",
+            runtime_mode="vla",
+        )
+        == "original/vla/qpos_gripper"
+    )
+    assert (
+        dataset_relative_dir(
+            "qpos_gripper",
             dataset_stage="trainable",
             runtime_mode="policy",
         )

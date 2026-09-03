@@ -37,6 +37,10 @@ outside this ownership boundary. Preserve them and avoid unrelated refactors.
 ### Capture
 
 - The UR5e `qpos_gripper` pipeline writes fixed-rate data at 15 Hz.
+- Capture profiles are `teleop`, `http`, `act`, and `vla`. They only classify
+  the output directory and episode metadata; all four use the same collector,
+  action semantics, and synchronization settings. The legacy `policy` path is
+  retained for reading historical datasets, but is not a new capture option.
 - Observation state and action are both seven values: six absolute joint
   positions followed by gripper state. The action is the next sampled absolute
   target, not a delta command.
@@ -47,8 +51,8 @@ outside this ownership boundary. Preserve them and avoid unrelated refactors.
 - ROS `CompressedImage` values such as `rgb8; jpeg compressed bgr8` are stored
   as external JPEG files. The converter decodes them to RGB when creating the
   LeRobot dataset.
-- Current hardware-launch defaults are 15 Hz, camera synchronization tolerance
-  `0.07 s`, and robot-state synchronization tolerance `0.03 s`.
+- Current capture defaults are 15 Hz, camera synchronization tolerance `0.07 s`,
+  and robot-state synchronization tolerance `0.07 s`.
 
 ### Annotation And Cleaning
 
@@ -76,6 +80,12 @@ outside this ownership boundary. Preserve them and avoid unrelated refactors.
 - Replay has episode selection, pause/resume/seek, a single timeline slider,
   replay robot model, and chart hover values.
 - The panel uses the black/red/gold display theme introduced by `0807display`.
+- CaptureManager starts only the fixed-rate collector. It does not start
+  teleoperation, HTTP control, ACT/VLA policies, robot drivers, or the Mode
+  Manager; control mode is switched independently through the Mode Manager.
+- Mode Manager integration uses `/control_mode/request`, `/control_mode`, and
+  `/control_mode/status`. The V2 manager sets HTTP ownership through
+  `/api/system/mode`, matching the current HTTP API contract.
 - Start the panel with the safe replay-state publisher setting:
 
 ```bash
@@ -168,10 +178,13 @@ workspace-wide `colcon build` has not been re-run as part of this handoff.
   took about 12 minutes per ACT or VLA export because 9466 JPEG frames are
   decoded and re-encoded into two H.264 streams. The backend runs it
   asynchronously; only one export may run at a time.
-- The intended policy in earlier discussion was `0.03 s` for both state and
-  camera synchronization. The committed hardware defaults currently remain
-  `0.03 s` state and `0.07 s` camera. Decide and test the desired camera
-  threshold before changing it.
+- Camera and robot-state synchronization now intentionally use `0.07 s` in the
+  collector defaults, capture launch files, and Qt capture-manager fallback.
+- The HTTP API package cannot be built in the current workspace until the
+  external `robotiq_2f_gripper_msgs` package is built and installed. Its older
+  `test_http_mode_guard.py` cases still assert the removed header-based control
+  guard and should be updated separately if that package is brought back into
+  the workspace build.
 - Automatic `candidate_success`, `candidate_failure`, and `needs_review`
   classification based on safety/task-completion signals is not implemented.
   Current success/failure labels are human annotations after capture.
