@@ -34,7 +34,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("root", default_value="/tmp/ur5e_datasets"),
         DeclareLaunchArgument("task", default_value="http_api"),
-        DeclareLaunchArgument("max_sync_delta_s", default_value="0.05"),
+        DeclareLaunchArgument("max_sync_delta_s", default_value="0.07"),
         DeclareLaunchArgument("gripper_state_topic", default_value="/gripper/state"),
         _collector_node(
             "data_collection_http_api_action_collector",

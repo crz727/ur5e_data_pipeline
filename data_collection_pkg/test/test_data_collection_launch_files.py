@@ -65,7 +65,7 @@ def test_hardware_qpos_collection_launch_is_packaged_and_fixed_rate():
     assert '"dataset_schema": "qpos_gripper"' in launch_text
     assert 'DeclareLaunchArgument("sample_rate_hz", default_value="15.0")' in launch_text
     assert 'DeclareLaunchArgument("max_sync_delta_s", default_value="0.07")' in launch_text
-    assert 'DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.03")' in launch_text
+    assert 'DeclareLaunchArgument("state_max_sync_delta_s", default_value="0.07")' in launch_text
     assert "action_topic" not in launch_text
     assert "launch/data_collection_hardware_qpos.launch.py" in setup_path.read_text(
         encoding="utf-8"

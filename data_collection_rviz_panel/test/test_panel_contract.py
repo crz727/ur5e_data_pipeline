@@ -233,3 +233,32 @@ def test_export_click_while_busy_reports_status_instead_of_silent_return():
     assert "if (lerobot_export_in_progress_)" in busy_guard
     assert "show_temporary_capture_status" in busy_guard
     assert "LeRobot export already running" in busy_guard
+
+
+def test_lerobot_export_uses_indeterminate_activity_indicator():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
+        encoding="utf-8"
+    )
+    start_method = main_window[
+        main_window.index("void MainWindow::start_lerobot_export("):
+        main_window.index("void MainWindow::request_lerobot_export_status()")
+    ]
+    status_method = main_window[
+        main_window.index("void MainWindow::request_lerobot_export_status()"):
+        main_window.index("void MainWindow::request_replay_episodes()")
+    ]
+
+    assert "class QProgressBar;" in header
+    assert "QProgressBar * lerobot_export_progress_" in header
+    assert "void set_lerobot_export_activity(bool active);" in header
+    assert "#include <QProgressBar>" in main_window
+    assert "lerobot_export_progress_ = new QProgressBar(capture_box);" in main_window
+    assert "void MainWindow::set_lerobot_export_activity(bool active)" in main_window
+    assert "lerobot_export_progress_->setRange(0, 0);" in main_window
+    assert "lerobot_export_progress_->hide();" in main_window
+    assert "set_lerobot_export_activity(true);" in start_method
+    assert "set_lerobot_export_activity(false);" in start_method
+    assert status_method.count("set_lerobot_export_activity(false);") == 2

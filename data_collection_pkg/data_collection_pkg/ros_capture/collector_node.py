@@ -49,8 +49,8 @@ def default_teleop_collector_config() -> dict:
             TELEOP_TOPICS["end_effector_pose"],
         ),
         "default_required_cameras": ("external", "wrist"),
-        "sync_tolerance_s": 0.05,
-        "state_sync_tolerance_s": 0.03,
+        "sync_tolerance_s": 0.07,
+        "state_sync_tolerance_s": 0.07,
         "sampling_mode": "action_triggered",
         "sample_rate_hz": 15.0,
         "image_storage_format": "jpeg",
@@ -730,8 +730,8 @@ def _declare_parameters(node) -> None:
     declare("safety_state_topic", TELEOP_TOPICS["safety_state"])
     declare("end_effector_pose_topic", TELEOP_TOPICS["end_effector_pose"])
     declare("required_cameras", "external,wrist")
-    declare("max_sync_delta_s", 0.05)
-    declare("state_max_sync_delta_s", 0.03)
+    declare("max_sync_delta_s", 0.07)
+    declare("state_max_sync_delta_s", 0.07)
     declare("require_message_stamps", False)
     for name, type_name in default_teleop_subscription_type_names().items():
         declare(f"{name}_msg_type", type_name)

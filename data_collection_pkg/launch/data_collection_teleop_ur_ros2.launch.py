@@ -16,7 +16,7 @@ def generate_launch_description():
         DeclareLaunchArgument("wrist_camera_msg_type", default_value="sensor_msgs.msg:CompressedImage"),
         DeclareLaunchArgument("safety_state_topic", default_value="/safety/state"),
         DeclareLaunchArgument("end_effector_pose_topic", default_value="/tool0/pose"),
-        DeclareLaunchArgument("max_sync_delta_s", default_value="0.05"),
+        DeclareLaunchArgument("max_sync_delta_s", default_value="0.07"),
         DeclareLaunchArgument("required_cameras", default_value=""),
         Node(
             package="data_collection_pkg",

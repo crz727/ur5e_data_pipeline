@@ -13,7 +13,7 @@ and outstanding decisions.
 
 - Repository root: `/home/crz/src`
 - Active branch: `master`
-- Latest committed pipeline/UI fix: `ce8bce7 fix: make LeRobot exports retryable`
+- Latest capture-boundary implementation: `ca1645b docs: clarify capture profile and control mode boundaries`
 - The last feature merge is `e2fe44f vladataset`.
 - The display redesign is `7240083 0807display`.
 - The current worktree also contains untracked external ROS packages,

@@ -19,6 +19,7 @@ class QLabel;
 class QLineEdit;
 class QNetworkAccessManager;
 class QPlainTextEdit;
+class QProgressBar;
 class QPushButton;
 class QSlider;
 class QTimer;
@@ -59,6 +60,7 @@ private:
   void start_lerobot_export(
     const QString & cleaned_dataset_dir, const QString & profile, const QString & output_dir);
   void request_lerobot_export_status();
+  void set_lerobot_export_activity(bool active);
   void request_replay_seek(int frame_index);
   void update_capture_toggle();
   void show_temporary_capture_status(const QString & status);
@@ -103,6 +105,7 @@ private:
   QLabel * mode_fault_value_{nullptr};
   QLabel * capture_status_value_{nullptr};
   QLabel * dataset_path_value_{nullptr};
+  QProgressBar * lerobot_export_progress_{nullptr};
   QPushButton * capture_toggle_button_{nullptr};
   QPushButton * clean_dataset_button_{nullptr};
   QPushButton * language_instruction_button_{nullptr};
