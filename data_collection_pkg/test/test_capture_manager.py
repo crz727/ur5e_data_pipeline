@@ -62,6 +62,33 @@ def test_capture_manager_starts_hardware_qpos_collector_only(tmp_path):
     assert not any("pika_teleop" in part for part in command)
 
 
+def test_capture_manager_forwards_scene_camera_clock_overrides(tmp_path):
+    calls = []
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda command, **kwargs: calls.append(command) or FakeProcess(),
+    )
+
+    manager.start({
+        "runtime_mode": "teleop",
+        "task": "camera_clock",
+        "sampling_clock": "scene_camera_header",
+        "sample_rate_hz": 30.0,
+        "camera_sync_tolerance_s": 0.02,
+        "state_max_sync_delta_s": 0.02,
+        "gripper_sync_tolerance_s": 0.03,
+        "scene_camera_settle_delay_s": 0.07,
+    })
+
+    command = calls[0]
+    assert "sampling_clock:=scene_camera_header" in command
+    assert "sample_rate_hz:=30.0" in command
+    assert "camera_sync_tolerance_s:=0.02" in command
+    assert "state_max_sync_delta_s:=0.02" in command
+    assert "gripper_sync_tolerance_s:=0.03" in command
+    assert "scene_camera_settle_delay_s:=0.07" in command
+
+
 def test_capture_manager_registers_and_launches_a_task_language_label(tmp_path):
     calls = []
     manager = CaptureManager(

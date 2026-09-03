@@ -1,5 +1,6 @@
 import inspect
 import json
+import pytest
 from types import SimpleNamespace
 
 import data_collection_pkg.action_replay.ursim_rviz_adapter_node as ursim_rviz
@@ -219,6 +220,82 @@ def test_collector_config_can_override_sync_tolerance():
     config = collector_node.teleop_collector_config_from_parameters(node)
 
     assert config["sync_tolerance_s"] == 0.02
+
+
+def test_fixed_rate_config_enables_scene_camera_clock_with_independent_tolerances():
+    config = collector_node.teleop_collector_config_from_parameters(_ParameterNode({
+        "sampling_mode": "fixed_rate",
+        "sampling_clock": "scene_camera_header",
+        "camera_sync_tolerance_s": 0.02,
+        "state_max_sync_delta_s": 0.02,
+        "gripper_sync_tolerance_s": 0.03,
+        "scene_camera_settle_delay_s": 0.07,
+    }))
+
+    assert config["sampling_clock"] == "scene_camera_header"
+    assert config["camera_sync_tolerance_s"] == 0.02
+    assert config["state_sync_tolerance_s"] == 0.02
+    assert config["gripper_sync_tolerance_s"] == 0.03
+    assert config["scene_camera_settle_delay_s"] == 0.07
+    assert config["external_camera_topic"] in config["required_topics"]
+    assert config["wrist_camera_topic"] in config["required_topics"]
+
+
+def test_fixed_rate_adapter_queues_scene_camera_header_only_in_camera_clock_mode(tmp_path):
+    config = collector_node.default_teleop_collector_config()
+    config.update({
+        "sampling_mode": "fixed_rate",
+        "sampling_clock": "scene_camera_header",
+        "required_topics": ("/joint_states", "/gripper/state", "/scene", "/wrist"),
+        "optional_topics": (),
+        "external_camera_topic": "/scene",
+        "wrist_camera_topic": "/wrist",
+        "default_required_cameras": ("external", "wrist"),
+    })
+    node = _FixedRateFakeNode()
+    adapter = collector_node.FixedRateQposDemoNodeAdapter(
+        node,
+        root=tmp_path,
+        task="camera_clock",
+        config=config,
+    )
+
+    node.subscriptions["/scene"](SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=0)),
+        format="jpeg",
+        data=b"scene",
+    ))
+
+    assert adapter.engine.camera_anchor_timestamps == [12.0]
+    assert adapter._camera_receive_delay_s == pytest.approx(111.456789)
+
+
+def test_camera_clock_rejects_unstamped_joint_and_wrist_samples(tmp_path):
+    config = collector_node.default_teleop_collector_config()
+    config.update({
+        "sampling_mode": "fixed_rate",
+        "sampling_clock": "scene_camera_header",
+        "required_topics": ("/joint_states", "/gripper/state", "/scene", "/wrist"),
+        "optional_topics": (),
+        "external_camera_topic": "/scene",
+        "wrist_camera_topic": "/wrist",
+    })
+    node = _FixedRateFakeNode()
+    collector_node.FixedRateQposDemoNodeAdapter(
+        node,
+        root=tmp_path,
+        task="camera_clock",
+        config=config,
+    )
+
+    node.subscriptions["/joint_states"](SimpleNamespace(position=[0.0] * 6))
+    node.subscriptions["/wrist"](SimpleNamespace(format="jpeg", data=b"wrist"))
+
+    drops = [json.loads(message.data)["drop_reasons"] for message in node.publishers[
+        "/data_collection/drop_reason"
+    ].messages]
+    assert ["missing_timestamp:/joint_states"] in drops
+    assert ["missing_timestamp:/wrist"] in drops
 
 
 def test_fixed_rate_node_adapter_forwards_annotation_to_episode_metadata(tmp_path):

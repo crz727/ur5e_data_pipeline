@@ -51,6 +51,11 @@ def default_teleop_collector_config() -> dict:
         "default_required_cameras": ("external", "wrist"),
         "sync_tolerance_s": 0.07,
         "state_sync_tolerance_s": 0.07,
+        "sampling_clock": "timer",
+        "camera_sync_tolerance_s": 0.02,
+        "gripper_sync_tolerance_s": 0.03,
+        "scene_camera_settle_delay_s": 0.07,
+        "camera_receive_delay_health_threshold_s": 0.05,
         "sampling_mode": "action_triggered",
         "sample_rate_hz": 15.0,
         "image_storage_format": "jpeg",
@@ -338,13 +343,19 @@ class FixedRateQposDemoNodeAdapter:
             raw_command_topic=self.config["action_topic"],
             tolerance_s=self.config["sync_tolerance_s"],
             topic_tolerances={
-                TELEOP_TOPICS["joint_states"]: self.config["state_sync_tolerance_s"],
-                self.config["gripper_state_topic"]: self.config["state_sync_tolerance_s"],
+                TELEOP_TOPICS["joint_states"]: self._state_tolerance(),
+                self.config["gripper_state_topic"]: self._gripper_tolerance(),
+                self.config["external_camera_topic"]: self._camera_tolerance(),
+                self.config["wrist_camera_topic"]: self._camera_tolerance(),
             },
+            camera_settle_delay_s=self.config["scene_camera_settle_delay_s"],
+            sample_rate_hz=self.config["sample_rate_hz"],
             status_callback=self._publish_status,
             drop_callback=self._publish_drop,
         )
         self._subscriptions = []
+        self._camera_receive_delay_s = None
+        self._camera_receive_delay_exceeded = False
         self._wire_subscriptions(qos)
         self._timer = node.create_timer(
             1.0 / float(self.config["sample_rate_hz"]),
@@ -449,10 +460,18 @@ class FixedRateQposDemoNodeAdapter:
         ))
 
     def _capture_tick(self) -> None:
-        self.engine.capture_at(self._receive_timestamp())
+        now = self._receive_timestamp()
+        if self.config["sampling_clock"] == "scene_camera_header":
+            self.engine.flush_camera_anchors(now=now)
+            return
+        self.engine.capture_at(now)
 
     def _add_sample(self, topic: str, sample_factory, msg, explicit_timestamp=None):
-        timestamp = self._sample_timestamp(msg, explicit_timestamp)
+        timestamp = self._sample_timestamp(
+            msg,
+            explicit_timestamp,
+            require_stamp=self._requires_header_timestamp(topic),
+        )
         if timestamp is None:
             self._publish_drop({
                 "timestamp": self._receive_timestamp(),
@@ -469,7 +488,21 @@ class FixedRateQposDemoNodeAdapter:
             return None
 
     def _add_camera_sample(self, topic: str, msg, explicit_timestamp=None):
-        timestamp = self._sample_timestamp(msg, explicit_timestamp)
+        received_at = self._receive_timestamp()
+        timestamp = self._sample_timestamp(
+            msg,
+            explicit_timestamp,
+            require_stamp=self._requires_header_timestamp(topic),
+        )
+        if self._uses_scene_camera_clock() and topic == self.config["external_camera_topic"]:
+            header_timestamp = _timestamp(msg, explicit_timestamp, require_stamp=True)
+            if header_timestamp is None:
+                self._publish_drop({
+                    "timestamp": received_at,
+                    "drop_reasons": [f"missing_timestamp:{topic}"],
+                })
+                return None
+            timestamp = header_timestamp
         if timestamp is None:
             self._publish_drop({
                 "timestamp": self._receive_timestamp(),
@@ -477,7 +510,13 @@ class FixedRateQposDemoNodeAdapter:
             })
             return None
         try:
-            return self.engine.add_sample(camera_sample(msg, topic=topic, timestamp=timestamp))
+            sample = camera_sample(msg, topic=topic, timestamp=timestamp)
+            self.engine.add_sample(sample)
+            if topic == self.config["external_camera_topic"]:
+                self._record_camera_receive_delay(received_at, timestamp)
+                if self._uses_scene_camera_clock():
+                    self.engine.capture_camera_anchor(timestamp, now=received_at)
+            return sample
         except Exception as exc:
             self._publish_drop({
                 "timestamp": timestamp,
@@ -485,12 +524,14 @@ class FixedRateQposDemoNodeAdapter:
             })
             return None
 
-    def _sample_timestamp(self, msg, explicit=None) -> float:
+    def _sample_timestamp(self, msg, explicit=None, *, require_stamp=None) -> float:
         return _timestamp(
             msg,
             explicit,
             fallback=self._receive_timestamp(),
-            require_stamp=self.require_message_stamps,
+            require_stamp=(
+                self.require_message_stamps if require_stamp is None else bool(require_stamp)
+            ),
         )
 
     def _receive_timestamp(self) -> float:
@@ -498,10 +539,58 @@ class FixedRateQposDemoNodeAdapter:
         return float(now)
 
     def _publish_status(self, payload: dict) -> None:
-        self.status_publisher.publish(self.string_msg_type(data=json.dumps(payload)))
+        status = dict(payload)
+        status.update({
+            "sampling_clock": self.config["sampling_clock"],
+            "camera_receive_delay_s": self._camera_receive_delay_s,
+            "camera_receive_delay_health": (
+                "unknown" if self._camera_receive_delay_s is None
+                else "warning" if self._camera_receive_delay_exceeded
+                else "ok"
+            ),
+            "camera_receive_delay_health_threshold_s": self.config[
+                "camera_receive_delay_health_threshold_s"
+            ],
+        })
+        self.status_publisher.publish(self.string_msg_type(data=json.dumps(status)))
 
     def _publish_drop(self, payload: dict) -> None:
         self.drop_publisher.publish(self.string_msg_type(data=json.dumps(payload)))
+
+    def _uses_scene_camera_clock(self) -> bool:
+        return self.config["sampling_clock"] == "scene_camera_header"
+
+    def _requires_header_timestamp(self, topic: str) -> bool:
+        if self.require_message_stamps:
+            return True
+        if not self._uses_scene_camera_clock():
+            return False
+        return topic in (
+            TELEOP_TOPICS["joint_states"],
+            self.config["external_camera_topic"],
+            self.config["wrist_camera_topic"],
+        )
+
+    def _camera_tolerance(self) -> float:
+        if self._uses_scene_camera_clock():
+            return self.config["camera_sync_tolerance_s"]
+        return self.config["sync_tolerance_s"]
+
+    def _state_tolerance(self) -> float:
+        if self._uses_scene_camera_clock():
+            return self.config["state_sync_tolerance_s"]
+        return self.config["state_sync_tolerance_s"]
+
+    def _gripper_tolerance(self) -> float:
+        if self._uses_scene_camera_clock():
+            return self.config["gripper_sync_tolerance_s"]
+        return self.config["state_sync_tolerance_s"]
+
+    def _record_camera_receive_delay(self, received_at: float, header_timestamp: float) -> None:
+        self._camera_receive_delay_s = float(received_at) - float(header_timestamp)
+        self._camera_receive_delay_exceeded = (
+            self._camera_receive_delay_s > self.config["camera_receive_delay_health_threshold_s"]
+        )
 
 
 def collector_node_main(args=None):
@@ -587,6 +676,21 @@ def teleop_collector_config_from_parameters(node) -> dict:
     schema = str(_parameter_value(node, "dataset_schema", config["schema"]))
     sampling_mode = str(_parameter_value(node, "sampling_mode", config["sampling_mode"]))
     sample_rate_hz = float(_parameter_value(node, "sample_rate_hz", config["sample_rate_hz"]))
+    sampling_clock = str(_parameter_value(node, "sampling_clock", config["sampling_clock"]))
+    camera_sync_tolerance_s = float(_parameter_value(
+        node, "camera_sync_tolerance_s", config["camera_sync_tolerance_s"]
+    ))
+    gripper_sync_tolerance_s = float(_parameter_value(
+        node, "gripper_sync_tolerance_s", config["gripper_sync_tolerance_s"]
+    ))
+    scene_camera_settle_delay_s = float(_parameter_value(
+        node, "scene_camera_settle_delay_s", config["scene_camera_settle_delay_s"]
+    ))
+    camera_receive_delay_health_threshold_s = float(_parameter_value(
+        node,
+        "camera_receive_delay_health_threshold_s",
+        config["camera_receive_delay_health_threshold_s"],
+    ))
     image_storage_format = str(_parameter_value(node, "image_storage_format", config["image_storage_format"]))
     jpeg_quality = int(_parameter_value(node, "jpeg_quality", config["jpeg_quality"]))
     task_id = _parameter_value(node, "task_id", "")
@@ -624,6 +728,12 @@ def teleop_collector_config_from_parameters(node) -> dict:
             safety_state_topic,
             end_effector_pose_topic,
         )
+        if sampling_clock == "scene_camera_header":
+            required_topics += (external_camera_topic, wrist_camera_topic)
+            optional_topics = tuple(
+                topic for topic in optional_topics
+                if topic not in (external_camera_topic, wrist_camera_topic)
+            )
     else:
         required_topics = (
             TELEOP_TOPICS["joint_states"],
@@ -643,6 +753,11 @@ def teleop_collector_config_from_parameters(node) -> dict:
         "dataset_stage": dataset_stage,
         "sampling_mode": sampling_mode,
         "sample_rate_hz": sample_rate_hz,
+        "sampling_clock": sampling_clock,
+        "camera_sync_tolerance_s": camera_sync_tolerance_s,
+        "gripper_sync_tolerance_s": gripper_sync_tolerance_s,
+        "scene_camera_settle_delay_s": scene_camera_settle_delay_s,
+        "camera_receive_delay_health_threshold_s": camera_receive_delay_health_threshold_s,
         "image_storage_format": image_storage_format,
         "jpeg_quality": jpeg_quality,
         "task_id": task_id,
@@ -718,6 +833,11 @@ def _declare_parameters(node) -> None:
     declare("dataset_schema", "teleop_twist_gripper")
     declare("sampling_mode", "action_triggered")
     declare("sample_rate_hz", 15.0)
+    declare("sampling_clock", "timer")
+    declare("camera_sync_tolerance_s", 0.02)
+    declare("gripper_sync_tolerance_s", 0.03)
+    declare("scene_camera_settle_delay_s", 0.07)
+    declare("camera_receive_delay_health_threshold_s", 0.05)
     declare("image_storage_format", "jpeg")
     declare("jpeg_quality", 75)
     declare("task_id", "")
