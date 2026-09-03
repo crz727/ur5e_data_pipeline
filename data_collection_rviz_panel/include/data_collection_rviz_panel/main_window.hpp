@@ -3,6 +3,7 @@
 #include <memory>
 #include <thread>
 
+#include <QJsonArray>
 #include <QMainWindow>
 
 #include <rclcpp/rclcpp.hpp>
@@ -50,7 +51,13 @@ private:
   void request_capture_stop_and_annotation();
   void request_capture_annotation(const QString & outcome);
   void request_dataset_cleaning();
-  void request_lerobot_export(const QString & cleaned_dataset_dir);
+  void request_language_instruction_editor();
+  void show_language_instruction_editor(const QJsonArray & labels);
+  void request_lerobot_export(const QString & cleaned_dataset_dir, const QString & profile);
+  void request_lerobot_export_preflight(
+    const QString & cleaned_dataset_dir, const QString & profile, const QString & output_dir);
+  void start_lerobot_export(
+    const QString & cleaned_dataset_dir, const QString & profile, const QString & output_dir);
   void request_lerobot_export_status();
   void request_replay_seek(int frame_index);
   void update_capture_toggle();
@@ -97,6 +104,7 @@ private:
   QLabel * dataset_path_value_{nullptr};
   QPushButton * capture_toggle_button_{nullptr};
   QPushButton * clean_dataset_button_{nullptr};
+  QPushButton * language_instruction_button_{nullptr};
   QPushButton * idle_button_{nullptr};
   QPushButton * auto_button_{nullptr};
   QPushButton * api_button_{nullptr};
@@ -128,6 +136,10 @@ private:
   int replay_frame_index_{-1};
   QString last_replay_status_name_;
   QString capture_dataset_path_;
+  QString capture_task_id_;
+  QString capture_language_instruction_en_;
+  QString capture_language_instruction_zh_;
+  QString lerobot_export_profile_{QStringLiteral("act")};
   bool capture_running_{false};
   bool replay_mode_active_{false};
   bool replay_timeline_dragging_{false};

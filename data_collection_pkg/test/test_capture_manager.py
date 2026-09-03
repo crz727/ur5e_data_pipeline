@@ -274,6 +274,55 @@ def test_capture_manager_exports_lerobot_in_background(tmp_path):
     assert converter_kwargs["video_codec"] == "h264"
 
 
+def test_capture_manager_preflights_vla_export_without_creating_output(tmp_path):
+    cleaned_dataset_dir = tmp_path / "cleaned" / "teleop" / "qpos_gripper"
+    metadata_path = cleaned_dataset_dir / "meta" / "episodes.jsonl"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text(
+        "\n".join([
+            json.dumps({
+                "episode_index": 10,
+                "task": "capture batch",
+                "action_schema": "qpos_gripper",
+                "frame_count": 1,
+                "data_path": "data/episode_000010.jsonl",
+                "dataset_stage": "cleaned",
+                "language_instruction_en": "Pick up the red block.",
+            }),
+            json.dumps({
+                "episode_index": 11,
+                "task": "capture batch",
+                "action_schema": "qpos_gripper",
+                "frame_count": 1,
+                "data_path": "data/episode_000011.jsonl",
+                "dataset_stage": "cleaned",
+                "language_instruction_en": "",
+                "language_instruction_zh": "抓取蓝色方块。",
+            }),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "lerobot-export"
+    manager = CaptureManager(root=tmp_path)
+
+    result = manager.preflight_lerobot_export({
+        "cleaned_dataset_dir": f"  {cleaned_dataset_dir}  ",
+        "output_dir": f"  {output_dir}  ",
+        "profile": "vla",
+    })
+
+    assert result["ok"] is True
+    assert result["profile"] == "vla"
+    assert [episode["episode_index"] for episode in result["eligible"]] == [10]
+    assert result["skipped"] == [{
+        "episode_index": 11,
+        "reason": "missing_english_instruction",
+    }]
+    assert result["planned_report_path"] == str(output_dir / "meta" / "vla_export_report.json")
+    assert not output_dir.exists()
+    assert manager._export_thread is None
+
+
 def test_capture_manager_annotates_only_episodes_added_by_completed_capture(tmp_path):
     process = FakeProcess()
     manager = CaptureManager(

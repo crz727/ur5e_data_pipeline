@@ -8,6 +8,7 @@ from PIL import Image
 from data_collection_pkg.dataset import converter as converter_module
 from data_collection_pkg.dataset.converter import convert_jsonl_to_lerobot
 from data_collection_pkg.dataset.jsonl_writer import JsonlDatasetWriter
+from data_collection_pkg.dataset.lerobot_verify import verify_lerobot_export
 
 
 class FakeLeRobotDataset:
@@ -469,6 +470,71 @@ def test_vla_profile_audits_and_skips_valid_language_episode_with_corrupt_frames
     assert [frame["task"] for frame in FakeLeRobotDataset.created["dataset"].frames] == [
         "Pick up the red block."
     ]
+
+
+def test_vla_profile_accounts_for_all_sources_when_first_image_payload_is_malformed(tmp_path):
+    dataset_dir = tmp_path / "cleaned" / "policy" / "qpos_gripper"
+    output_dir = tmp_path / "vla"
+    _write_profile_dataset(dataset_dir)
+    rows = _read_jsonl(dataset_dir / "meta" / "episodes.jsonl")[:2]
+    rows[1].update({
+        "episode_index": 20,
+        "task_id": "pick_blue_block",
+        "language_instruction_en": "Pick up the blue block.",
+        "language_instruction_zh": "抓取蓝色方块。",
+    })
+    (dataset_dir / "meta" / "episodes.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    first_frame_path = dataset_dir / rows[0]["data_path"]
+    first_frame = _read_jsonl(first_frame_path)[0]
+    first_frame["observation"]["images"]["external"] = "not-an-image"
+    first_frame_path.write_text(json.dumps(first_frame) + "\n", encoding="utf-8")
+
+    summary = convert_jsonl_to_lerobot(
+        dataset_dir,
+        output_dir=output_dir,
+        profile="vla",
+        dataset_cls=FakeLeRobotDataset,
+    )
+
+    assert summary["episode_count"] == 1
+    assert summary["source_episode_count"] == 2
+    assert summary["skipped_count"] == 1
+    report = json.loads((output_dir / "meta" / "vla_export_report.json").read_text())
+    assert report["eligible_source_episode_indices"] == [20]
+    assert report["source_to_output_episode_mapping"] == {"20": 0}
+    assert report["skipped"] == [{
+        "episode_index": 10,
+        "reason": "data_integrity_conversion_error",
+        "error": "invalid image payload: external",
+    }]
+    annotations = _read_jsonl(output_dir / "meta" / "episode_language_annotations.jsonl")
+    assert [row["source_episode_index"] for row in annotations] == [20]
+
+    meta = output_dir / "meta"
+    (meta / "episodes" / "chunk-000").mkdir(parents=True)
+    (output_dir / "data" / "chunk-000").mkdir(parents=True)
+    (meta / "info.json").write_text(json.dumps({"total_episodes": 1}), encoding="utf-8")
+    (meta / "stats.json").write_text("{}", encoding="utf-8")
+    (meta / "tasks.jsonl").write_text("{}\n", encoding="utf-8")
+    (meta / "episodes" / "chunk-000" / "file-000.parquet").write_bytes(b"episodes")
+    (output_dir / "data" / "chunk-000" / "file-000.parquet").write_bytes(b"data")
+    for camera in ("top", "wrist"):
+        camera_dir = output_dir / "videos" / f"observation.images.{camera}" / "chunk-000"
+        camera_dir.mkdir(parents=True)
+        (camera_dir / "file-000.mp4").write_bytes(b"video")
+
+    verification = verify_lerobot_export(
+        output_dir,
+        expected_episode_count=1,
+        expected_cameras=("top", "wrist"),
+        profile="vla",
+        require_image_normalization=True,
+    )
+    assert verification["ok"] is True
+    assert verification["issues"] == []
 
 
 def test_image_normalization_metadata_does_not_rewrite_measured_stats(tmp_path):

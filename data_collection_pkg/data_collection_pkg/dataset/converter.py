@@ -87,6 +87,7 @@ def convert_jsonl_to_lerobot(
     frame_count = 0
     completed_episodes = []
     active_episode = None
+    camera_names = tuple(_camera_target_name(camera) for camera in cameras)
     try:
         for episode in episodes:
             active_episode = episode
@@ -103,28 +104,38 @@ def convert_jsonl_to_lerobot(
             writer.close_episode()
             completed_episodes.append(episode)
             active_episode = None
+        writer.finalize()
+        write_image_normalization_metadata(output_dir, camera_names)
+        if profile == "vla":
+            _write_episode_language_annotations(output_dir, episodes)
     except Exception as exc:
         if profile == "vla":
-            if active_episode is not None:
+            completed_indices = {row["episode_index"] for row in completed_episodes}
+            active_index = (
+                active_episode["episode_index"] if active_episode is not None else None
+            )
+            for episode in episodes:
+                episode_index = episode["episode_index"]
+                if episode_index in completed_indices:
+                    continue
                 skipped.append({
-                    "episode_index": active_episode["episode_index"],
-                    "reason": "data_integrity_conversion_error",
+                    "episode_index": episode_index,
+                    "reason": (
+                        "data_integrity_conversion_error"
+                        if episode_index == active_index
+                        else "conversion_aborted"
+                    ),
                     "error": str(exc),
                 })
             _write_vla_export_report(
                 output_dir,
                 dataset_dir,
-                episodes,
+                completed_episodes,
                 skipped,
-                exported=completed_episodes,
             )
         raise
-    writer.finalize()
-    camera_names = tuple(_camera_target_name(camera) for camera in cameras)
-    write_image_normalization_metadata(output_dir, camera_names)
     if profile == "vla":
         _write_vla_export_report(output_dir, dataset_dir, episodes, skipped)
-        _write_episode_language_annotations(output_dir, episodes)
 
     result = {
         "episode_count": len(episodes),
@@ -221,19 +232,16 @@ def _write_vla_export_report(
     dataset_dir: Path,
     eligible: list,
     skipped: list,
-    *,
-    exported: list = None,
 ) -> Path:
     path = Path(output_dir) / "meta" / "vla_export_report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    exported = eligible if exported is None else exported
     payload = {
         "source": str(dataset_dir),
         "profile": "vla",
         "eligible_source_episode_indices": [row["episode_index"] for row in eligible],
         "source_to_output_episode_mapping": {
             str(row["episode_index"]): output_index
-            for output_index, row in enumerate(exported)
+            for output_index, row in enumerate(eligible)
         },
         "skipped": skipped,
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -299,18 +307,55 @@ def _episode_data_integrity_error(
                     if source_name not in images:
                         return f"missing required camera: {source_name}"
                     payload = images[source_name]
-                    if isinstance(payload, Mapping) and not any(
-                        key in payload for key in ("data", "array", "image")
-                    ):
-                        external_path = payload.get("data_path")
-                        if not external_path or not (dataset_dir / str(external_path)).is_file():
-                            return "image payload must contain data"
+                    image_error = _image_payload_integrity_error(payload, dataset_dir)
+                    if image_error is not None:
+                        return f"{image_error}: {source_name}"
     except OSError as exc:
         return f"unable to read episode data: {exc}"
     except json.JSONDecodeError as exc:
         return f"invalid episode JSON: {exc}"
     if frame_count == 0:
         return "episode contains no frames"
+    return None
+
+
+def _image_payload_integrity_error(payload, dataset_dir: Path) -> str | None:
+    if isinstance(payload, Mapping):
+        data = payload.get("data", payload.get("array", payload.get("image")))
+        if data is None:
+            external_path = payload.get("data_path")
+            if not external_path:
+                return "image payload must contain data"
+            try:
+                data = (dataset_dir / str(external_path)).read_bytes()
+            except OSError:
+                return "image payload must contain data"
+        codec = str(payload.get("codec", payload.get("format", ""))).lower()
+        if codec in {"jpeg", "jpg", "png", "rgb8; jpeg compressed"}:
+            if _encoded_image_shape(data, codec) is None:
+                return "invalid image payload"
+            return None
+        try:
+            array = np.asarray(data, dtype=np.uint8)
+        except (TypeError, ValueError):
+            return "invalid image payload"
+        shape = _image_payload_shape(payload, dataset_dir)
+        if array.ndim == 3 and array.shape[-1] == 3:
+            return None
+        if (
+            array.ndim == 1
+            and shape is not None
+            and shape[-1] == 3
+            and int(np.prod(shape)) == array.size
+        ):
+            return None
+        return "invalid image payload"
+    try:
+        array = np.asarray(payload, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return "invalid image payload"
+    if array.ndim != 3 or array.shape[-1] != 3:
+        return "invalid image payload"
     return None
 
 

@@ -47,8 +47,16 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "clean_dialog_buttons->addWidget(clean_no)" in main_window
     assert 'QStringLiteral("Open Report")' in main_window
     assert "QDesktopServices::openUrl" in main_window
-    assert 'QStringLiteral("Export LeRobot")' in main_window
+    assert 'QStringLiteral("Language Instruction")' in main_window
+    assert 'QStringLiteral("English instruction")' in main_window
+    assert 'QStringLiteral("中文指令")' in main_window
+    assert 'QStringLiteral("Export ACT")' in main_window
+    assert 'QStringLiteral("Export VLA")' in main_window
+    assert 'QStringLiteral("Export LeRobot")' not in main_window
+    assert 'QStringLiteral("/api/capture/task-labels")' in main_window
+    assert 'QStringLiteral("/api/capture/export-lerobot/preflight")' in main_window
     assert 'QStringLiteral("/api/capture/export-lerobot")' in main_window
+    assert 'QStringLiteral("profile")' in main_window
     assert "QMessageBox" in main_window
     assert "#include <QDialog>" in main_window
     assert "auto * result_dialog = new QDialog(this);" in main_window

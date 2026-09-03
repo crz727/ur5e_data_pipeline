@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional
 
 from data_collection_pkg.dataset.cleaner import clean_original_dataset
-from data_collection_pkg.dataset.converter import convert_jsonl_to_lerobot
+from data_collection_pkg.dataset.converter import (
+    convert_jsonl_to_lerobot,
+    preflight_jsonl_to_lerobot,
+)
 from data_collection_pkg.dataset.task_annotations import (
     load_task_catalog,
     parse_capture_task_annotation,
@@ -243,6 +246,33 @@ class CaptureManager:
             )
             return {"ok": True, **result}
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def preflight_lerobot_export(self, payload: Mapping) -> dict:
+        """Report LeRobot export eligibility without writing an output dataset."""
+        if self._is_running():
+            return {"ok": False, "error": "stop capture before exporting LeRobot"}
+        if not isinstance(payload, Mapping):
+            return {"ok": False, "error": "preflight payload must be a JSON object"}
+        try:
+            cleaned_value = payload.get("cleaned_dataset_dir", "")
+            output_value = payload.get("output_dir", "")
+            profile = payload.get("profile", "act")
+            if not isinstance(cleaned_value, str) or not cleaned_value.strip():
+                raise ValueError("cleaned_dataset_dir must be a non-empty string")
+            if not isinstance(output_value, str) or not output_value.strip():
+                raise ValueError("output_dir must be a non-empty string")
+            if not isinstance(profile, str) or not profile.strip():
+                raise ValueError("profile must be a non-empty string")
+            cleaned_dataset_dir = Path(cleaned_value.strip()).expanduser()
+            output_dir = Path(output_value.strip()).expanduser()
+            result = preflight_jsonl_to_lerobot(cleaned_dataset_dir, profile.strip())
+            if result["profile"] == "vla":
+                result["planned_report_path"] = str(
+                    output_dir / "meta" / "vla_export_report.json"
+                )
+            return {"ok": True, **result}
+        except (OSError, RuntimeError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
     def start_lerobot_export(self, payload: Mapping) -> dict:
