@@ -97,7 +97,7 @@ def test_capture_manager_registers_and_launches_a_task_language_label(tmp_path):
     assert (tmp_path / "_task_catalog.jsonl").is_file()
 
 
-def test_capture_manager_keeps_no_language_act_capture_valid(tmp_path):
+def test_capture_manager_omits_empty_language_launch_arguments(tmp_path):
     calls = []
     manager = CaptureManager(
         root=tmp_path,
@@ -108,10 +108,39 @@ def test_capture_manager_keeps_no_language_act_capture_valid(tmp_path):
 
     assert result["ok"] is True
     assert "task:=act_only_batch" in calls[0]
-    assert "task_id:=" in calls[0]
-    assert "language_instruction_en:=" in calls[0]
-    assert "language_instruction_zh:=" in calls[0]
+    assert not any(item.startswith("task_id:=") for item in calls[0])
+    assert not any(item.startswith("language_instruction_en:=") for item in calls[0])
+    assert not any(item.startswith("language_instruction_zh:=") for item in calls[0])
     assert manager.task_labels() == {"ok": True, "labels": []}
+
+
+def test_capture_manager_accepts_act_and_vla_as_capture_profiles(tmp_path):
+    calls = []
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda command, **kwargs: calls.append(command) or FakeProcess(),
+    )
+
+    for runtime_mode in ("act", "vla"):
+        result = manager.start({"runtime_mode": runtime_mode, "task": f"{runtime_mode}_batch"})
+        assert result["ok"] is True
+        assert result["runtime_mode"] == runtime_mode
+        assert result["dataset_dir"] == str(
+            Path(result["task_root"]) / "original" / runtime_mode / "qpos_gripper"
+        )
+        manager.stop()
+
+    assert all("data_collection_hardware_qpos.launch.py" in command for command in calls)
+    assert not any("policy" in item for command in calls for item in command)
+
+
+def test_capture_manager_rejects_new_policy_capture_profile(tmp_path):
+    manager = CaptureManager(root=tmp_path, popen=lambda *args, **kwargs: FakeProcess())
+
+    result = manager.start({"runtime_mode": "policy", "task": "legacy_policy_batch"})
+
+    assert result["ok"] is False
+    assert "runtime_mode" in result["error"]
 
 
 def test_capture_manager_rejects_conflicting_reuse_of_task_language_label(tmp_path):
@@ -157,7 +186,7 @@ def test_capture_manager_uses_15hz_when_no_rate_is_requested(tmp_path):
 
     assert "sample_rate_hz:=15.0" in calls[0]
     assert "max_sync_delta_s:=0.07" in calls[0]
-    assert "state_max_sync_delta_s:=0.03" in calls[0]
+    assert "state_max_sync_delta_s:=0.07" in calls[0]
 
 
 def test_capture_manager_new_task_creates_current_task_folder(tmp_path):

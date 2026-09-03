@@ -21,7 +21,7 @@ from data_collection_pkg.dataset.task_annotations import (
 )
 
 
-ALLOWED_RUNTIME_MODES = ("policy", "teleop", "http")
+ALLOWED_RUNTIME_MODES = ("teleop", "http", "act", "vla")
 
 
 class CaptureManager:
@@ -384,6 +384,15 @@ class CaptureManager:
         task_root: Path,
         annotation: Mapping[str, object],
     ) -> list:
+        annotation_args = []
+        for name in (
+            "task_id",
+            "language_instruction_en",
+            "language_instruction_zh",
+        ):
+            value = str(annotation.get(name, "")).strip()
+            if value:
+                annotation_args.append(f"{name}:={value}")
         command = [
             "ros2",
             "launch",
@@ -391,9 +400,7 @@ class CaptureManager:
             "data_collection_hardware_qpos.launch.py",
             f"root:={task_root}",
             f"task:={task}",
-            f"task_id:={annotation.get('task_id', '')}",
-            f"language_instruction_en:={annotation.get('language_instruction_en', '')}",
-            f"language_instruction_zh:={annotation.get('language_instruction_zh', '')}",
+            *annotation_args,
             f"dataset_stage:={dataset_stage}",
             f"runtime_mode:={runtime_mode}",
             f"sample_rate_hz:={payload.get('sample_rate_hz', 15.0)}",
@@ -406,7 +413,7 @@ class CaptureManager:
             f"end_effector_pose_topic:={payload.get('end_effector_pose_topic', '/tcp_pose_broadcaster/pose')}",
             f"required_cameras:={payload.get('required_cameras', 'external,wrist')}",
             f"max_sync_delta_s:={payload.get('max_sync_delta_s', 0.07)}",
-            f"state_max_sync_delta_s:={payload.get('state_max_sync_delta_s', 0.03)}",
+            f"state_max_sync_delta_s:={payload.get('state_max_sync_delta_s', 0.07)}",
             f"image_storage_format:={payload.get('image_storage_format', 'jpeg')}",
             f"jpeg_quality:={payload.get('jpeg_quality', 75)}",
         ]
