@@ -3,6 +3,7 @@ import threading
 import time
 from pathlib import Path
 
+from data_collection_pkg.dataset import task_annotations
 from data_collection_pkg.visualization.capture_manager import CaptureManager
 
 
@@ -57,6 +58,92 @@ def test_capture_manager_starts_hardware_qpos_collector_only(tmp_path):
     assert calls[0][1]["start_new_session"] is True
     assert not any("ur5e_http_api" in part for part in command)
     assert not any("pika_teleop" in part for part in command)
+
+
+def test_capture_manager_registers_and_launches_a_task_language_label(tmp_path):
+    calls = []
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda command, **kwargs: calls.append((command, kwargs)) or FakeProcess(),
+        now=lambda: 1785488195.0,
+    )
+
+    result = manager.start({
+        "runtime_mode": "teleop",
+        "task": "pick_place_batch_0807",
+        "task_id": "pick_red_block_to_blue_tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+    })
+
+    command = calls[0][0]
+    labels = manager.task_labels()
+    assert result["ok"] is True
+    assert "task:=pick_place_batch_0807" in command
+    assert "task_id:=pick-red-block-to-blue-tray" in command
+    assert "language_instruction_en:=Pick up the red block and place it in the blue tray." in command
+    assert "language_instruction_zh:=抓取红色方块并放入蓝色托盘。" in command
+    assert labels == {
+        "ok": True,
+        "labels": [{
+            "task_name": "pick_place_batch_0807",
+            "task_id": "pick-red-block-to-blue-tray",
+            "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+            "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+            "annotation_source": "capture_ui",
+            "last_used_at": 1785488195.0,
+        }],
+    }
+    assert (tmp_path / "_task_catalog.jsonl").is_file()
+
+
+def test_capture_manager_keeps_no_language_act_capture_valid(tmp_path):
+    calls = []
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda command, **kwargs: calls.append(command) or FakeProcess(),
+    )
+
+    result = manager.start({"runtime_mode": "teleop", "task": "act_only_batch"})
+
+    assert result["ok"] is True
+    assert "task:=act_only_batch" in calls[0]
+    assert "task_id:=" in calls[0]
+    assert "language_instruction_en:=" in calls[0]
+    assert "language_instruction_zh:=" in calls[0]
+    assert manager.task_labels() == {"ok": True, "labels": []}
+
+
+def test_capture_manager_rejects_conflicting_reuse_of_task_language_label(tmp_path):
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda *_args, **_kwargs: FakeProcess(),
+    )
+    payload = {
+        "runtime_mode": "teleop",
+        "task": "pick_place_batch_0807",
+        "task_id": "pick_red_block_to_blue_tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+    }
+    manager.start(payload)
+    manager.stop()
+
+    result = manager.start({
+        **payload,
+        "language_instruction_en": "Put the red block into the blue tray.",
+    })
+
+    assert result["ok"] is False
+    assert "conflicting English" in result["error"]
+
+
+def test_vla_english_instruction_validation_rejects_missing_and_placeholder_text():
+    assert task_annotations.validate_vla_english_instruction("") == "missing_english_instruction"
+    assert task_annotations.validate_vla_english_instruction("抓取红色方块") == "missing_english_instruction"
+    assert task_annotations.validate_vla_english_instruction("test_01") == "invalid_english_instruction"
+    assert task_annotations.validate_vla_english_instruction("episode-003") == "invalid_english_instruction"
+    assert task_annotations.validate_vla_english_instruction("Pick up the red block.") is None
 
 
 def test_capture_manager_uses_15hz_when_no_rate_is_requested(tmp_path):

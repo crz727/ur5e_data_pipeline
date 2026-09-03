@@ -2,12 +2,26 @@
 
 import json
 import math
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
+
+import numpy as np
 
 from data_collection_pkg.dataset.lerobot_writer import LeRobotDatasetWriter
 from data_collection_pkg.dataset.lerobot_verify import verify_lerobot_export
+from data_collection_pkg.dataset.task_annotations import validate_vla_english_instruction
+
+
+_DEFAULT_CAMERAS = (("top", "external"), ("wrist", "wrist"))
+_IMAGE_NORMALIZATION = {
+    "input": "uint8_rgb",
+    "conversion": "float32_rgb_0_to_1",
+    "normalization": "imagenet_rgb",
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225],
+}
 
 
 def convert_jsonl_to_lerobot(
@@ -23,27 +37,36 @@ def convert_jsonl_to_lerobot(
     video_codec: str = "h264",
     image_shape=None,
     dataset_cls=None,
+    profile: str = "act",
 ) -> dict:
     """Convert one JSONL dataset directory to an official LeRobotDataset."""
     dataset_dir = Path(dataset_dir)
-    _validate_cleaned_qpos_dataset(dataset_dir)
     output_dir = Path(output_dir or output_root) if (output_dir or output_root) else None
     if output_dir is None:
         raise ValueError("output_dir is required")
+    profile = _normalize_profile(profile)
     repo_id = str(repo_id or f"local/{output_dir.name}")
-    episodes = _read_episodes(dataset_dir)
-    if not episodes:
-        raise ValueError("dataset metadata contains no episodes")
-    schema_names = {row["action_schema"] for row in episodes}
-    if len(schema_names) != 1:
-        raise ValueError("LeRobot conversion expects one action_schema per dataset")
-    schema_name = next(iter(schema_names))
-    task = str(episodes[0].get("task", ""))
+    preflight = preflight_jsonl_to_lerobot(dataset_dir, profile)
+    episodes = preflight["eligible"]
+    skipped = preflight["skipped"]
+    schema_name = preflight["schema_name"]
+    cameras = tuple(cameras) if cameras else _DEFAULT_CAMERAS
+
+    if profile == "vla":
+        episodes, integrity_skipped = _partition_data_integrity_episodes(
+            dataset_dir,
+            episodes,
+            cameras,
+        )
+        skipped.extend(integrity_skipped)
+    if profile == "vla" and not episodes:
+        _write_vla_export_report(output_dir, dataset_dir, episodes, skipped)
+        raise ValueError("VLA export has no eligible episodes with a valid English instruction")
+
     inferred_image_shape = image_shape or _infer_image_shape(dataset_dir, episodes, cameras)
     writer = LeRobotDatasetWriter(
         output_dir,
         schema_name,
-        task=task,
         repo_id=repo_id,
         fps=fps,
         robot_type=robot_type,
@@ -62,37 +85,248 @@ def convert_jsonl_to_lerobot(
             pass
 
     frame_count = 0
-    for episode in episodes:
-        writer.start_episode()
-        data_path = dataset_dir / episode["data_path"]
-        with data_path.open("r", encoding="utf-8-sig") as stream:
-            for line in stream:
-                if not line.strip():
-                    continue
-                frame = json.loads(line)
-                _hydrate_external_images(frame, dataset_dir)
-                writer.add_frame(frame["observation"], frame["action"])
-                frame_count += 1
-        writer.close_episode()
+    completed_episodes = []
+    active_episode = None
+    try:
+        for episode in episodes:
+            active_episode = episode
+            writer.start_episode(task=episode["task"])
+            data_path = dataset_dir / episode["data_path"]
+            with data_path.open("r", encoding="utf-8-sig") as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    frame = json.loads(line)
+                    _hydrate_external_images(frame, dataset_dir)
+                    writer.add_frame(frame["observation"], frame["action"])
+                    frame_count += 1
+            writer.close_episode()
+            completed_episodes.append(episode)
+            active_episode = None
+    except Exception as exc:
+        if profile == "vla":
+            if active_episode is not None:
+                skipped.append({
+                    "episode_index": active_episode["episode_index"],
+                    "reason": "data_integrity_conversion_error",
+                    "error": str(exc),
+                })
+            _write_vla_export_report(
+                output_dir,
+                dataset_dir,
+                episodes,
+                skipped,
+                exported=completed_episodes,
+            )
+        raise
     writer.finalize()
+    camera_names = tuple(_camera_target_name(camera) for camera in cameras)
+    write_image_normalization_metadata(output_dir, camera_names)
+    if profile == "vla":
+        _write_vla_export_report(output_dir, dataset_dir, episodes, skipped)
+        _write_episode_language_annotations(output_dir, episodes)
 
     result = {
         "episode_count": len(episodes),
+        "source_episode_count": len(episodes) + len(skipped),
+        "skipped_count": len(skipped),
         "frame_count": frame_count,
         "schema_name": schema_name,
         "repo_id": repo_id,
         "output_dir": str(output_dir),
+        "profile": profile,
     }
     if dataset_cls is None:
         result.update(verify_lerobot_export(
             output_dir,
             expected_episode_count=len(episodes),
-            expected_cameras=tuple(_camera_target_name(camera) for camera in cameras),
+            expected_cameras=camera_names,
             visual_storage=visual_storage,
+            profile=profile,
+            require_image_normalization=True,
         ))
         if not result["ok"]:
             raise RuntimeError("LeRobot export verification failed: " + ", ".join(result["issues"]))
     return result
+
+
+def preflight_jsonl_to_lerobot(dataset_dir: Path, profile: str) -> dict:
+    """Select profile-eligible episodes without creating an output dataset."""
+    dataset_dir = Path(dataset_dir)
+    profile = _normalize_profile(profile)
+    _validate_cleaned_qpos_dataset(dataset_dir)
+    episodes = _read_episodes(dataset_dir)
+    if not episodes:
+        raise ValueError("dataset metadata contains no episodes")
+    schema_names = {row["action_schema"] for row in episodes}
+    if len(schema_names) != 1:
+        raise ValueError("LeRobot conversion expects one action_schema per dataset")
+    schema_name = next(iter(schema_names))
+    if schema_name != "qpos_gripper":
+        raise ValueError("LeRobot conversion requires the qpos_gripper action schema")
+
+    eligible = []
+    skipped = []
+    for row in episodes:
+        episode_index = row["episode_index"]
+        if profile == "vla":
+            english = _normalized_text(row.get("language_instruction_en"))
+            reason = validate_vla_english_instruction(english)
+            if reason is not None:
+                skipped.append({"episode_index": episode_index, "reason": reason})
+                continue
+            task = english
+        else:
+            task = (
+                _normalized_text(row.get("task_id"))
+                or _normalized_text(row.get("task"))
+                or f"episode-{episode_index}"
+            )
+        eligible.append({**row, "task": task})
+    return {
+        "profile": profile,
+        "schema_name": schema_name,
+        "eligible": eligible,
+        "skipped": skipped,
+    }
+
+
+def write_image_normalization_metadata(output_dir: Path, camera_names) -> Path:
+    """Write the ImageNet preprocessing contract without changing measured stats."""
+    path = Path(output_dir) / "meta" / "image_normalization.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        **_IMAGE_NORMALIZATION,
+        "applies_to": [f"observation.images.{name}" for name in camera_names],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _normalize_profile(profile: str) -> str:
+    value = str(profile).strip().lower()
+    if value not in {"act", "vla"}:
+        raise ValueError("profile must be act or vla")
+    return value
+
+
+def _normalized_text(value) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).split())
+
+
+def _write_vla_export_report(
+    output_dir: Path,
+    dataset_dir: Path,
+    eligible: list,
+    skipped: list,
+    *,
+    exported: list = None,
+) -> Path:
+    path = Path(output_dir) / "meta" / "vla_export_report.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exported = eligible if exported is None else exported
+    payload = {
+        "source": str(dataset_dir),
+        "profile": "vla",
+        "eligible_source_episode_indices": [row["episode_index"] for row in eligible],
+        "source_to_output_episode_mapping": {
+            str(row["episode_index"]): output_index
+            for output_index, row in enumerate(exported)
+        },
+        "skipped": skipped,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _partition_data_integrity_episodes(
+    dataset_dir: Path,
+    episodes: list,
+    cameras: Sequence,
+) -> tuple[list, list]:
+    eligible = []
+    skipped = []
+    for episode in episodes:
+        error = _episode_data_integrity_error(dataset_dir, episode, cameras)
+        if error is None:
+            eligible.append(episode)
+        else:
+            skipped.append({
+                "episode_index": episode["episode_index"],
+                "reason": "data_integrity_conversion_error",
+                "error": error,
+            })
+    return eligible, skipped
+
+
+def _episode_data_integrity_error(
+    dataset_dir: Path,
+    episode: Mapping,
+    cameras: Sequence,
+) -> str | None:
+    data_path = dataset_dir / str(episode.get("data_path", ""))
+    frame_count = 0
+    try:
+        with data_path.open("r", encoding="utf-8-sig") as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                frame_count += 1
+                frame = json.loads(line)
+                observation = frame.get("observation")
+                if not isinstance(observation, Mapping):
+                    return "frame observation must be an object"
+                try:
+                    state = np.asarray(observation.get("state"), dtype=np.float32)
+                except (TypeError, ValueError):
+                    return "observation.state must contain 7 values"
+                if state.shape != (7,):
+                    return "observation.state must contain 7 values"
+                try:
+                    action = np.asarray(frame.get("action"), dtype=np.float32)
+                except (TypeError, ValueError):
+                    return "qpos_gripper expects 7 values"
+                if action.shape != (7,):
+                    return "qpos_gripper expects 7 values"
+                images = observation.get("images") or {}
+                if not isinstance(images, Mapping):
+                    return "observation.images must be an object"
+                for camera in cameras:
+                    source_name = _camera_source_name(camera)
+                    if source_name not in images:
+                        return f"missing required camera: {source_name}"
+                    payload = images[source_name]
+                    if isinstance(payload, Mapping) and not any(
+                        key in payload for key in ("data", "array", "image")
+                    ):
+                        external_path = payload.get("data_path")
+                        if not external_path or not (dataset_dir / str(external_path)).is_file():
+                            return "image payload must contain data"
+    except OSError as exc:
+        return f"unable to read episode data: {exc}"
+    except json.JSONDecodeError as exc:
+        return f"invalid episode JSON: {exc}"
+    if frame_count == 0:
+        return "episode contains no frames"
+    return None
+
+
+def _write_episode_language_annotations(output_dir: Path, episodes: list) -> Path:
+    path = Path(output_dir) / "meta" / "episode_language_annotations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        for output_index, row in enumerate(episodes):
+            stream.write(json.dumps({
+                "output_episode_index": output_index,
+                "source_episode_index": row["episode_index"],
+                "task_id": _normalized_text(row.get("task_id")),
+                "language_instruction_en": _normalized_text(row.get("language_instruction_en")),
+                "language_instruction_zh": _normalized_text(row.get("language_instruction_zh")),
+            }, ensure_ascii=False) + "\n")
+    return path
 
 
 def _validate_cleaned_qpos_dataset(dataset_dir: Path) -> None:
