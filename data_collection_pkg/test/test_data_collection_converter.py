@@ -547,3 +547,21 @@ def test_image_normalization_metadata_does_not_rewrite_measured_stats(tmp_path):
 
     assert path == meta / "image_normalization.json"
     assert (meta / "stats.json").read_text(encoding="utf-8") == stats
+
+
+def test_converter_rejects_existing_output_directory_before_creating_lerobot_dataset(tmp_path):
+    dataset_dir = tmp_path / "cleaned" / "policy" / "qpos_gripper"
+    output_dir = tmp_path / "lerobot"
+    _write_profile_dataset(dataset_dir)
+    output_dir.mkdir()
+    FakeLeRobotDataset.created = None
+
+    with pytest.raises(ValueError, match="output directory already exists"):
+        convert_jsonl_to_lerobot(
+            dataset_dir,
+            output_dir=output_dir,
+            profile="act",
+            dataset_cls=FakeLeRobotDataset,
+        )
+
+    assert FakeLeRobotDataset.created is None

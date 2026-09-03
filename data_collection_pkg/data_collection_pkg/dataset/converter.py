@@ -44,6 +44,10 @@ def convert_jsonl_to_lerobot(
     output_dir = Path(output_dir or output_root) if (output_dir or output_root) else None
     if output_dir is None:
         raise ValueError("output_dir is required")
+    if output_dir.exists():
+        raise ValueError(
+            f"output directory already exists: {output_dir}; choose a new path"
+        )
     profile = _normalize_profile(profile)
     repo_id = str(repo_id or f"local/{output_dir.name}")
     preflight = preflight_jsonl_to_lerobot(dataset_dir, profile)

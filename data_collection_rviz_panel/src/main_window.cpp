@@ -1042,8 +1042,19 @@ void MainWindow::post_json(const QString & path, const QJsonObject & payload)
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
     const QString transport_error = reply->errorString();
     reply->deleteLater();
+    const QJsonDocument document = QJsonDocument::fromJson(response);
+    const QJsonObject response_object = document.object();
+    if (path == QStringLiteral("/api/capture/start") &&
+      (!transport_ok || !document.isObject() ||
+      !response_object.value(QStringLiteral("ok")).toBool()))
+    {
+      const QString error = document.isObject() ?
+        response_object.value(QStringLiteral("error")).toString() : transport_error;
+      show_temporary_capture_status(QStringLiteral("Capture could not start: %1").arg(
+        error.isEmpty() ? QStringLiteral("backend unavailable") : error));
+      return;
+    }
     if (path.startsWith(QStringLiteral("/api/replay/"))) {
-      const QJsonDocument document = QJsonDocument::fromJson(response);
       if (!transport_ok || (document.isObject() && !document.object().value(QStringLiteral("ok")).toBool())) {
         const QString error = document.isObject() ?
           document.object().value(QStringLiteral("error")).toString() : transport_error;
@@ -1051,6 +1062,20 @@ void MainWindow::post_json(const QString & path, const QJsonObject & payload)
           error.isEmpty() ? QStringLiteral("backend unavailable") : error));
       }
     }
+    request_dashboard_state();
+  });
+}
+
+void MainWindow::show_temporary_capture_status(const QString & status)
+{
+  capture_status_override_active_ = true;
+  const int generation = ++capture_status_override_generation_;
+  capture_status_value_->setText(status);
+  QTimer::singleShot(3000, this, [this, generation]() {
+    if (generation != capture_status_override_generation_) {
+      return;
+    }
+    capture_status_override_active_ = false;
     request_dashboard_state();
   });
 }
@@ -1145,6 +1170,11 @@ void MainWindow::request_capture_annotation(const QString & outcome)
 
 void MainWindow::request_language_instruction_editor()
 {
+  if (capture_running_ || language_editor_request_in_progress_) {
+    return;
+  }
+  language_editor_request_in_progress_ = true;
+  update_capture_toggle();
   const auto reply = network_->get(QNetworkRequest(
     QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/task-labels"))));
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1152,6 +1182,11 @@ void MainWindow::request_language_instruction_editor()
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
     const QString transport_error = reply->errorString();
     reply->deleteLater();
+    language_editor_request_in_progress_ = false;
+    update_capture_toggle();
+    if (capture_running_) {
+      return;
+    }
     const QJsonDocument document = QJsonDocument::fromJson(body);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
@@ -1274,7 +1309,8 @@ void MainWindow::update_capture_toggle()
       !capture_running_ && !capture_dataset_path_.isEmpty() && !cleaning_in_progress_);
   }
   if (language_instruction_button_ != nullptr) {
-    language_instruction_button_->setEnabled(!capture_running_);
+    language_instruction_button_->setEnabled(
+      !capture_running_ && !language_editor_request_in_progress_);
   }
 }
 
@@ -1364,7 +1400,8 @@ void MainWindow::request_lerobot_export(
     return;
   }
   if (lerobot_export_in_progress_) {
-    capture_status_value_->setText(QStringLiteral("LeRobot export already running"));
+    show_temporary_capture_status(QStringLiteral("LeRobot export already running (%1)")
+      .arg(lerobot_export_profile_.toUpper()));
     return;
   }
   const QString normalized_profile = profile.trimmed().toLower();
@@ -1373,24 +1410,49 @@ void MainWindow::request_lerobot_export(
     return;
   }
   const QString profile_label = normalized_profile.toUpper();
+  lerobot_export_in_progress_ = true;
+  lerobot_export_profile_ = normalized_profile;
   auto * dialog = new QFileDialog(
     this, QStringLiteral("Select %1 Output Parent Directory").arg(profile_label));
   dialog->setFileMode(QFileDialog::Directory);
   dialog->setOption(QFileDialog::ShowDirsOnly, true);
   dialog->setOption(QFileDialog::DontUseNativeDialog, true);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &QFileDialog::rejected, this, [this]() {
+    lerobot_export_in_progress_ = false;
+    request_dashboard_state();
+  });
   connect(dialog, &QFileDialog::fileSelected, this,
     [this, cleaned_dataset_dir, normalized_profile, profile_label](const QString & output_parent) {
     bool accepted = false;
-    const QString default_name = normalized_profile == QStringLiteral("vla") ?
+    QString default_output_name = normalized_profile == QStringLiteral("vla") ?
       QStringLiteral("lerobot_vla_v3") : QStringLiteral("lerobot_act_v3");
+    QString suggested_output_name = default_output_name;
+    int suffix = 1;
+    while (QDir(output_parent).exists(suggested_output_name)) {
+      suggested_output_name = QStringLiteral("%1_%2").arg(default_output_name).arg(suffix++);
+    }
     const QString output_name = QInputDialog::getText(
       this, QStringLiteral("%1 Output Name").arg(profile_label), QStringLiteral("Directory name"),
-      QLineEdit::Normal, default_name, &accepted).trimmed();
-    if (!accepted || output_name.isEmpty() || output_name.contains(QLatin1Char('/'))) {
+      QLineEdit::Normal, suggested_output_name, &accepted).trimmed();
+    if (!accepted || output_name.isEmpty()) {
+      lerobot_export_in_progress_ = false;
+      request_dashboard_state();
+      return;
+    }
+    if (output_name.contains(QLatin1Char('/'))) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(
+        QStringLiteral("%1 export output name cannot contain '/'").arg(profile_label));
       return;
     }
     const QString output_dir = QDir(output_parent).filePath(output_name);
+    if (QDir(output_dir).exists()) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(
+        QStringLiteral("%1 export output already exists; choose a new name").arg(profile_label));
+      return;
+    }
     if (normalized_profile == QStringLiteral("vla")) {
       request_lerobot_export_preflight(cleaned_dataset_dir, normalized_profile, output_dir);
       return;
@@ -1425,7 +1487,8 @@ void MainWindow::request_lerobot_export_preflight(
     if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
       const QString error = document.isObject() ?
         response.value(QStringLiteral("error")).toString() : transport_error;
-      capture_status_value_->setText(QStringLiteral("VLA export preflight failed: %1").arg(
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("VLA export preflight failed: %1").arg(
         error.isEmpty() ? QStringLiteral("backend unavailable") : error));
       return;
     }
@@ -1441,7 +1504,8 @@ void MainWindow::request_lerobot_export_preflight(
       this, QStringLiteral("Confirm VLA Export"), message,
       QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (choice != QMessageBox::Yes) {
-      capture_status_value_->setText(QStringLiteral("VLA export cancelled"));
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("VLA export cancelled"));
       return;
     }
     start_lerobot_export(cleaned_dataset_dir, profile, output_dir);
@@ -1453,6 +1517,7 @@ void MainWindow::start_lerobot_export(
 {
   const QString profile_label = profile.toUpper();
   lerobot_export_profile_ = profile;
+  lerobot_export_in_progress_ = true;
   capture_status_value_->setText(QStringLiteral("%1 export queued...").arg(profile_label));
   QNetworkRequest request(QUrl(
     QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot")));
@@ -1476,12 +1541,12 @@ void MainWindow::start_lerobot_export(
     if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
       const QString error = document.isObject() ?
         response.value(QStringLiteral("error")).toString() : transport_error;
-      capture_status_value_->setText(QStringLiteral("%1 export could not start: %2").arg(
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("%1 export could not start: %2").arg(
         profile_label, error.isEmpty() ? QStringLiteral("backend unavailable") : error));
       return;
     }
     capture_status_value_->setText(QStringLiteral("%1 export running...").arg(profile_label));
-    lerobot_export_in_progress_ = true;
     request_lerobot_export_status();
   });
 }
@@ -1499,9 +1564,11 @@ void MainWindow::request_lerobot_export_status()
     const QJsonDocument document = QJsonDocument::fromJson(body);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject()) {
-      lerobot_export_in_progress_ = false;
-      capture_status_value_->setText(QStringLiteral("%1 export status unavailable: %2").arg(
-        profile_label, transport_error));
+      const QString status_error = transport_ok ?
+        QStringLiteral("invalid backend response") : transport_error;
+      show_temporary_capture_status(QStringLiteral("%1 export status unavailable: %2").arg(
+        profile_label, status_error));
+      QTimer::singleShot(1000, this, &MainWindow::request_lerobot_export_status);
       return;
     }
     const QString status = response.value(QStringLiteral("status")).toString();
@@ -1513,7 +1580,7 @@ void MainWindow::request_lerobot_export_status()
     if (status == QStringLiteral("done")) {
       lerobot_export_in_progress_ = false;
       const QJsonObject result = response.value(QStringLiteral("result")).toObject();
-      capture_status_value_->setText(QStringLiteral("%1 export complete: %2").arg(
+      show_temporary_capture_status(QStringLiteral("%1 export complete: %2").arg(
         profile_label, result.value(QStringLiteral("output_dir")).toString()));
       const QString report_path = result.value(QStringLiteral("verification_report_path")).toString();
       if (!report_path.isEmpty()) {
@@ -1521,10 +1588,16 @@ void MainWindow::request_lerobot_export_status()
       }
       return;
     }
-    lerobot_export_in_progress_ = false;
-    capture_status_value_->setText(QStringLiteral("%1 export failed: %2").arg(
-      profile_label,
-      response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
+    if (status == QStringLiteral("failed")) {
+      lerobot_export_in_progress_ = false;
+      show_temporary_capture_status(QStringLiteral("%1 export failed: %2").arg(
+        profile_label,
+        response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
+      return;
+    }
+    show_temporary_capture_status(QStringLiteral(
+      "%1 export status unavailable: invalid backend response").arg(profile_label));
+    QTimer::singleShot(1000, this, &MainWindow::request_lerobot_export_status);
   });
 }
 
@@ -1601,7 +1674,7 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
              capture.value(QStringLiteral("returncode")).isDouble()) {
     capture_status = QStringLiteral("Stopped (code %1)").arg(capture.value(QStringLiteral("returncode")).toInt());
   }
-  if (!lerobot_export_in_progress_) {
+  if (!lerobot_export_in_progress_ && !capture_status_override_active_) {
     capture_status_value_->setText(capture_status);
   }
   capture_running_ = capture_running;
