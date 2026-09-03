@@ -65,6 +65,14 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert 'QStringLiteral("/api/capture/export-lerobot")' in main_window
     assert 'QStringLiteral("profile")' in main_window
     assert 'path == QStringLiteral("/api/capture/start")' in main_window
+    assert '{QStringLiteral("sample_rate_hz"), 30.0}' in main_window
+    assert '{QStringLiteral("sampling_clock"), QStringLiteral("scene_camera_header")}' in main_window
+    assert '{QStringLiteral("camera_sync_tolerance_s"), 0.02}' in main_window
+    assert '{QStringLiteral("joint_state_sync_tolerance_s"), 0.02}' in main_window
+    assert '{QStringLiteral("gripper_sync_tolerance_s"), 0.03}' in main_window
+    assert '{QStringLiteral("target_fps"), 30.0}' in main_window
+    assert '{QStringLiteral("max_sync_delta_s"), 0.02}' in main_window
+    assert '{QStringLiteral("fps"), 30.0}' in main_window
     assert 'QStringLiteral("Capture could not start: %1")' in main_window
     assert "connect(dialog, &QFileDialog::rejected" in main_window
     assert "show_temporary_capture_status" in main_window

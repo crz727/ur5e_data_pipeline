@@ -36,7 +36,8 @@ outside this ownership boundary. Preserve them and avoid unrelated refactors.
 
 ### Capture
 
-- The UR5e `qpos_gripper` pipeline writes fixed-rate data at 15 Hz.
+- The UR5e `qpos_gripper` pipeline writes fixed-rate data at 15 Hz, anchored
+  to scene-camera header timestamps.
 - Capture profiles are `teleop`, `http`, `act`, and `vla`. They only classify
   the output directory and episode metadata; all four use the same collector,
   action semantics, and synchronization settings. The legacy `policy` path is
@@ -51,8 +52,10 @@ outside this ownership boundary. Preserve them and avoid unrelated refactors.
 - ROS `CompressedImage` values such as `rgb8; jpeg compressed bgr8` are stored
   as external JPEG files. The converter decodes them to RGB when creating the
   LeRobot dataset.
-- Current capture defaults are 15 Hz, camera synchronization tolerance `0.07 s`,
-  and robot-state synchronization tolerance `0.07 s`.
+- Current capture defaults are 15 Hz with `scene_camera_header`: camera and
+  joint-state synchronization tolerances are `0.02 s`, and binary-gripper
+  synchronization tolerance is `0.03 s`. The 70 ms scene-camera settlement
+  window waits for peer messages to arrive but does not relax those thresholds.
 - The fixed-rate hardware collector defaults to `/binary_gripper_state`
   (`std_msgs.msg:Int8`) and stores its `0/1` value directly as the seventh
   qpos/gripper state and action dimension. The legacy
@@ -183,8 +186,9 @@ workspace-wide `colcon build` has not been re-run as part of this handoff.
   took about 12 minutes per ACT or VLA export because 9466 JPEG frames are
   decoded and re-encoded into two H.264 streams. The backend runs it
   asynchronously; only one export may run at a time.
-- Camera and robot-state synchronization now intentionally use `0.07 s` in the
-  collector defaults, capture launch files, and Qt capture-manager fallback.
+- Historical 30 Hz datasets retain their existing metadata and remain
+  compatible with cleaning, replay, and LeRobot export; pass explicit 30 Hz
+  parameters when cleaning or exporting them.
 - The HTTP API package cannot be built in the current workspace until the
   external `robotiq_2f_gripper_msgs` package is built and installed. Its older
   `test_http_mode_guard.py` cases still assert the removed header-based control

@@ -227,7 +227,7 @@ def test_fixed_rate_config_enables_scene_camera_clock_with_independent_tolerance
         "sampling_mode": "fixed_rate",
         "sampling_clock": "scene_camera_header",
         "camera_sync_tolerance_s": 0.02,
-        "state_max_sync_delta_s": 0.02,
+        "joint_state_sync_tolerance_s": 0.02,
         "gripper_sync_tolerance_s": 0.03,
         "scene_camera_settle_delay_s": 0.07,
     }))
@@ -239,6 +239,22 @@ def test_fixed_rate_config_enables_scene_camera_clock_with_independent_tolerance
     assert config["scene_camera_settle_delay_s"] == 0.07
     assert config["external_camera_topic"] in config["required_topics"]
     assert config["wrist_camera_topic"] in config["required_topics"]
+
+
+def test_fixed_rate_config_uses_legacy_state_tolerance_only_without_canonical_parameter():
+    legacy = collector_node.teleop_collector_config_from_parameters(_ParameterNode({
+        "sampling_mode": "fixed_rate",
+        "state_max_sync_delta_s": 0.04,
+    }))
+    canonical = collector_node.teleop_collector_config_from_parameters(_ParameterNode({
+        "sampling_mode": "fixed_rate",
+        "state_max_sync_delta_s": 0.04,
+        "joint_state_sync_tolerance_s": 0.02,
+    }))
+
+    assert legacy["state_sync_tolerance_s"] == 0.04
+    assert canonical["state_sync_tolerance_s"] == 0.02
+    assert canonical["sample_rate_hz"] == 15.0
 
 
 def test_fixed_rate_adapter_queues_scene_camera_header_only_in_camera_clock_mode(tmp_path):

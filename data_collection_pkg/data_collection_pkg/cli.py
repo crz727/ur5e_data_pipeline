@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from data_collection_pkg.action_replay.replay_simulator import simulate_episode
-from data_collection_pkg.dataset.cleaner import clean_original_dataset
+from data_collection_pkg.dataset.cleaner import CleaningConfig, clean_original_dataset
 from data_collection_pkg.dataset.converter import convert_jsonl_to_lerobot
 from data_collection_pkg.dataset.jsonl_writer import JsonlDatasetWriter
 from data_collection_pkg.dataset.lerobot_viz import LeRobotVizConfig, run_lerobot_viz
@@ -54,6 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Create a sibling cleaned dataset from an original qpos_gripper dataset",
     )
     clean.add_argument("dataset_dir")
+    clean.add_argument("--target-fps", type=float, default=15.0)
+    clean.add_argument("--max-sync-delta-s", type=float, default=0.02)
+    clean.add_argument("--fps-tolerance-ratio", type=float, default=0.5)
 
     replay = subparsers.add_parser("simulate-replay", help="Dry-run replay simulation")
     replay.add_argument("dataset_dir")
@@ -137,7 +140,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0 if report.ok else 2
 
     if args.command == "clean-original":
-        result = clean_original_dataset(Path(args.dataset_dir))
+        result = clean_original_dataset(Path(args.dataset_dir), config=CleaningConfig(
+            target_fps=args.target_fps,
+            max_sync_delta_s=args.max_sync_delta_s,
+            fps_tolerance_ratio=args.fps_tolerance_ratio,
+        ))
         print(json.dumps(result, ensure_ascii=False))
         return 0
 
