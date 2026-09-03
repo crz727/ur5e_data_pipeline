@@ -14,6 +14,7 @@ from data_collection_pkg.dataset.converter import (
     convert_jsonl_to_lerobot,
     preflight_jsonl_to_lerobot,
 )
+from data_collection_pkg.dataset.hdf5_converter import convert_jsonl_to_hdf5
 from data_collection_pkg.dataset.task_annotations import (
     load_task_catalog,
     parse_capture_task_annotation,
@@ -38,11 +39,13 @@ class CaptureManager:
         popen: Optional[Callable] = None,
         now: Optional[Callable[[], float]] = None,
         converter: Optional[Callable] = None,
+        hdf5_converter: Optional[Callable] = None,
     ) -> None:
         self.root = Path(root).expanduser()
         self.popen = popen or subprocess.Popen
         self.now = now or time.time
         self.converter = converter or convert_jsonl_to_lerobot
+        self.hdf5_converter = hdf5_converter or convert_jsonl_to_hdf5
         self.process = None
         self.started_at = None
         self.command = None
@@ -345,6 +348,34 @@ class CaptureManager:
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
+    def export_hdf5(self, payload: Mapping) -> dict:
+        """Export a cleaned dataset to the project HDF5 v1 interchange file."""
+        if self._is_running():
+            return {"ok": False, "error": "stop capture before exporting HDF5"}
+        try:
+            cleaned_value = str(payload.get("cleaned_dataset_dir", "")).strip()
+            output_value = str(payload.get("output_path", "")).strip()
+            if not cleaned_value:
+                raise ValueError("cleaned_dataset_dir is required")
+            if not output_value:
+                raise ValueError("output_path is required")
+            output_path = Path(output_value).expanduser()
+            if output_path.suffix.lower() not in {".h5", ".hdf5"}:
+                raise ValueError("output_path must end with .h5 or .hdf5")
+            result = self.hdf5_converter(Path(cleaned_value).expanduser(), output_path)
+            return {"ok": True, **result, "format": "hdf5"}
+        except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def export(self, payload: Mapping) -> dict:
+        """Dispatch an asynchronous export request by output format."""
+        fmt = str(payload.get("format", "")).strip().lower()
+        if fmt == "hdf5":
+            return self.export_hdf5(payload)
+        if fmt in {"act", "vla"}:
+            return self.export_lerobot({**dict(payload), "profile": fmt})
+        raise ValueError("format must be act, vla, or hdf5")
+
     def preflight_lerobot_export(self, payload: Mapping) -> dict:
         """Report LeRobot export eligibility without writing an output dataset."""
         if self._is_running():
@@ -402,6 +433,29 @@ class CaptureManager:
             self._export_thread.start()
             return dict(self._export_status)
 
+    def start_export(self, payload: Mapping) -> dict:
+        """Start a format-neutral asynchronous export."""
+        if self._is_running():
+            return {"ok": False, "error": "stop capture before exporting"}
+        fmt = str(payload.get("format", "")).strip().lower()
+        if fmt not in {"act", "vla", "hdf5"}:
+            return {"ok": False, "error": "format must be act, vla, or hdf5"}
+        with self._export_lock:
+            if self._export_thread is not None and self._export_thread.is_alive():
+                return {"ok": False, **dict(self._export_status), "error": "export already running"}
+            self._export_job_id += 1
+            job_id = self._export_job_id
+            self._export_status = {
+                "ok": True, "status": "queued", "job_id": job_id,
+                "format": fmt, "started_at": None, "finished_at": None,
+                "result": None, "error": None,
+            }
+            self._export_thread = threading.Thread(
+                target=self._run_export, args=(job_id, dict(payload)), daemon=True
+            )
+            self._export_thread.start()
+            return dict(self._export_status)
+
     def lerobot_export_status(self) -> dict:
         """Return the latest asynchronous export status."""
         with self._export_lock:
@@ -437,6 +491,26 @@ class CaptureManager:
                     "error": result.get("error", "LeRobot export failed"),
                     "finished_at": self.now(),
                 })
+
+    def _run_export(self, job_id: int, payload: Mapping) -> None:
+        with self._export_lock:
+            if self._export_status.get("job_id") != job_id:
+                return
+            self._export_status.update({"status": "running", "started_at": self.now()})
+        try:
+            result = self.export(payload)
+        except Exception as exc:
+            result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        with self._export_lock:
+            if self._export_status.get("job_id") != job_id:
+                return
+            self._export_status.update({
+                "ok": bool(result.get("ok")),
+                "status": "done" if result.get("ok") else "failed",
+                "result": result if result.get("ok") else None,
+                "error": None if result.get("ok") else result.get("error", "export failed"),
+                "finished_at": self.now(),
+            })
 
     def status(self) -> dict:
         """Return current capture state."""

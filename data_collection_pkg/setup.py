@@ -23,7 +23,7 @@ setup(
             "docs/REAL_ROBOT_VALIDATION.md",
         ]),
     ],
-    install_requires=["setuptools", "flask", "numpy"],
+    install_requires=["setuptools", "flask", "numpy", "h5py", "pillow"],
     zip_safe=True,
     maintainer="hjy",
     maintainer_email="hjy@todo.todo",
@@ -32,6 +32,7 @@ setup(
     extras_require={
         "test": ["pytest"],
         "lerobot": ["lerobot"],
+        "hdf5": ["h5py", "pillow"],
     },
     entry_points={
         "console_scripts": [

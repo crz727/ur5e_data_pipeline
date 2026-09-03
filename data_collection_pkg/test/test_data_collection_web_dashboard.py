@@ -270,12 +270,35 @@ def test_dashboard_capture_api_delegates_to_manager():
     assert preflight.get_json()["planned_report_path"].endswith("vla_export_report.json")
     assert manager.preflight_payload["profile"] == "vla"
     export_status = client.get("/api/capture/export-lerobot/status")
-
     assert exported.status_code == 202
     assert exported.get_json()["status"] == "queued"
     assert export_status.status_code == 200
     assert export_status.get_json()["status"] == "running"
     assert manager.export_payload["cleaned_dataset_dir"].endswith("qpos_gripper")
+
+
+def test_dashboard_generic_hdf5_export_routes_to_format_neutral_manager():
+    class FakeManager:
+        def start_export(self, payload):
+            self.payload = payload
+            return {"ok": True, "status": "queued", "job_id": 4, "format": "hdf5"}
+
+        def lerobot_export_status(self):
+            return {"ok": True, "status": "running", "job_id": 4, "format": "hdf5"}
+
+    manager = FakeManager()
+    app = create_dashboard_app(DashboardStateStore(), capture_manager=manager)
+    client = app.test_client()
+    response = client.post("/api/capture/export", json={
+        "format": "hdf5",
+        "cleaned_dataset_dir": "/tmp/cleaned/teleop/qpos_gripper",
+        "output_path": "/tmp/export.hdf5",
+    })
+    assert response.status_code == 202
+    assert manager.payload["format"] == "hdf5"
+    status = client.get("/api/capture/export/status")
+    assert status.status_code == 200
+    assert status.get_json()["format"] == "hdf5"
 
 
 def test_dashboard_preflight_and_task_labels_require_capture_controls():
