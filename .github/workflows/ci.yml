@@ -1,0 +1,46 @@
+name: ROS 2 CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    container:
+      image: osrf/ros:humble-desktop-jammy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install project dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y python3-pytest python3-flask python3-numpy \
+            python3-pil python3-requests python3-pip \
+            python3-colcon-common-extensions ros-humble-xacro
+          python3 -m pip install --no-cache-dir --disable-pip-version-check pyarrow
+
+      - name: Build packages
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --symlink-install --packages-select \
+            data_collection_pkg data_collection_rviz_panel
+
+      - name: Run Python tests
+        working-directory: data_collection_pkg
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q test
+
+      - name: Run Qt contract tests
+        working-directory: data_collection_rviz_panel
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q test
