@@ -643,3 +643,35 @@ def test_capture_manager_rejects_annotation_before_new_episode_is_stopped(tmp_pa
     assert while_running["ok"] is False
     assert no_episode["ok"] is False
     assert invalid_outcome["ok"] is False
+
+
+def test_capture_manager_resumes_existing_dataset_without_overwriting_episodes(tmp_path):
+    dataset_dir = tmp_path / "old_task" / "original" / "teleop" / "qpos_gripper"
+    metadata_path = dataset_dir / "meta" / "episodes.jsonl"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text(json.dumps({
+        "episode_index": 4,
+        "task": "pick_block",
+        "task_id": "pick_block",
+        "language_instruction_en": "Pick up the block.",
+    }) + "\n", encoding="utf-8")
+    calls = []
+    manager = CaptureManager(
+        root=tmp_path,
+        popen=lambda command, **_kwargs: calls.append(command) or FakeProcess(),
+    )
+
+    selected = manager.select_existing_dataset({"dataset_dir": str(dataset_dir)})
+    assert manager.status()["dataset_dir"] == str(dataset_dir)
+    started = manager.start({"runtime_mode": "teleop"})
+    manager.stop()
+    mismatch = manager.start({"runtime_mode": "http"})
+
+    assert selected["ok"] is True
+    assert selected["task"] == "pick_block"
+    assert started["dataset_dir"] == str(dataset_dir)
+    assert "root:=" + str(tmp_path / "old_task") in calls[0]
+    assert mismatch["ok"] is False
+    assert "must match selected dataset mode" in mismatch["error"]
+    manager.new_task({"task": "new_task"})
+    assert manager.start({"runtime_mode": "http"})["ok"] is True
