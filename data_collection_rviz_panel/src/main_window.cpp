@@ -1,6 +1,8 @@
 #include "data_collection_rviz_panel/main_window.hpp"
 
 #include <algorithm>
+#include <cerrno>
+#include <csignal>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -36,6 +38,7 @@
 #include <QPainterPath>
 #include <QPlainTextEdit>
 #include <QProgressBar>
+#include <QProcess>
 #include <QPushButton>
 #include <QKeySequence>
 #include <QMenu>
@@ -76,6 +79,25 @@ constexpr char kModeRequestTopic[] = "/control_mode/request";
 constexpr char kModeTopic[] = "/control_mode";
 constexpr char kModeStatusTopic[] = "/control_mode/status";
 constexpr char kReplayJointStateTopic[] = "/data_collection/replay/joint_states";
+constexpr char kControlApiHealthUrl[] = "http://127.0.0.1:5000/api/health";
+
+bool process_is_running(qint64 pid)
+{
+  if (pid <= 0) {
+    return false;
+  }
+  if (::kill(static_cast<pid_t>(pid), 0) == 0) {
+    return true;
+  }
+  return errno == EPERM;
+}
+
+void request_process_stop(qint64 pid)
+{
+  if (pid > 0 && process_is_running(pid)) {
+    ::kill(static_cast<pid_t>(pid), SIGINT);
+  }
+}
 
 QString pretty_json(const QJsonValue & value)
 {
@@ -561,6 +583,12 @@ MainWindow::MainWindow(QWidget * parent)
   initialize_ros();
   QTimer::singleShot(0, this, &MainWindow::initialize_rviz);
 
+  control_services_timeout_timer_ = new QTimer(this);
+  control_services_timeout_timer_->setSingleShot(true);
+  connect(control_services_timeout_timer_, &QTimer::timeout, this,
+    &MainWindow::handle_control_services_timeout);
+  update_control_services_button();
+
   state_timer_ = new QTimer(this);
   connect(state_timer_, &QTimer::timeout, this, &MainWindow::request_dashboard_state);
   state_timer_->start(100);
@@ -699,6 +727,24 @@ void MainWindow::build_ui()
       [this, mode = mode_buttons[index].second]() { request_mode(mode); });
   }
   mode_layout->addWidget(mode_actions_frame);
+  auto * control_services_frame = new QFrame(mode_box);
+  control_services_frame->setObjectName(QStringLiteral("control_services_panel"));
+  control_services_frame->setStyleSheet(QStringLiteral(
+    "QFrame#control_services_panel { border:1px solid #6f542b; border-radius:3px; background:#111216; }"));
+  auto * control_services_layout = new QHBoxLayout(control_services_frame);
+  control_services_status_value_ = make_value_label(QStringLiteral("Control services not started"));
+  control_services_button_ = new QPushButton(QStringLiteral("Start control services"), control_services_frame);
+  control_services_status_value_->setWordWrap(true);
+  control_services_layout->addWidget(control_services_status_value_, 1);
+  control_services_layout->addWidget(control_services_button_);
+  connect(control_services_button_, &QPushButton::clicked, this, [this]() {
+    if (control_services_state_ == ControlServicesState::Running && services_owned_) {
+      stop_control_services();
+    } else if (control_services_state_ == ControlServicesState::Stopped) {
+      start_control_services();
+    }
+  });
+  mode_layout->addWidget(control_services_frame);
   mode_box->setMinimumHeight(315);
   operation_layout->addWidget(mode_box);
 
@@ -746,7 +792,7 @@ void MainWindow::build_ui()
       {QStringLiteral("task_id"), capture_task_id_},
       {QStringLiteral("language_instruction_en"), capture_language_instruction_en_},
       {QStringLiteral("language_instruction_zh"), capture_language_instruction_zh_},
-      {QStringLiteral("sample_rate_hz"), 30.0},
+      {QStringLiteral("sample_rate_hz"), 15.0},
       {QStringLiteral("sampling_clock"), QStringLiteral("scene_camera_header")},
       {QStringLiteral("camera_sync_tolerance_s"), 0.02},
       {QStringLiteral("joint_state_sync_tolerance_s"), 0.02},
@@ -928,13 +974,26 @@ void MainWindow::initialize_ros()
       if (!document.isObject()) { return; }
       const QJsonObject status = document.object();
       QMetaObject::invokeMethod(this, [this, status]() {
+        const QString state = status.value(QStringLiteral("state")).toString();
+        const QString owner = status.value(QStringLiteral("owner")).toString();
+        mode_status_received_ = true;
         mode_value_->setText(status.value(QStringLiteral("current_mode")).toString());
-        mode_state_value_->setText(status.value(QStringLiteral("state")).toString());
-        mode_owner_value_->setText(status.value(QStringLiteral("owner")).toString());
+        mode_state_value_->setText(state);
+        mode_owner_value_->setText(owner);
         mode_step_value_->setText(status.value(QStringLiteral("step")).toString());
         mode_fault_value_->setText(status.value(QStringLiteral("fault")).toString(QStringLiteral("none")));
-        const bool switching = status.value(QStringLiteral("state")).toString() == QStringLiteral("SWITCHING");
+        const bool switching = state == QStringLiteral("SWITCHING");
         for (QPushButton * button : {idle_button_, auto_button_, api_button_, teleop_button_}) { button->setEnabled(!switching); }
+        if (control_services_state_ == ControlServicesState::StartingModeManager) {
+          control_services_timeout_timer_->stop();
+          control_services_state_ = ControlServicesState::Running;
+          control_services_status_value_->setText(QStringLiteral("Control services running"));
+          update_control_services_button();
+        } else if (control_services_state_ == ControlServicesState::WaitingForIdle &&
+          state == QStringLiteral("IDLE") && owner == QStringLiteral("none"))
+        {
+          stop_owned_mode_manager();
+        }
       }, Qt::QueuedConnection);
     });
   joint_state_subscription_ = node_->create_subscription<sensor_msgs::msg::JointState>(kJointStateTopic, 30,
@@ -1153,6 +1212,12 @@ void MainWindow::request_capture_stop_and_annotation()
 
 void MainWindow::request_capture_annotation(const QString & outcome)
 {
+  if (capture_annotation_in_progress_) {
+    return;
+  }
+  capture_annotation_in_progress_ = true;
+  update_capture_toggle();
+  capture_status_value_->setText(QStringLiteral("Saving capture outcome..."));
   QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/annotate")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   const QJsonObject annotation_payload{{QStringLiteral("outcome"), outcome}};
@@ -1163,6 +1228,7 @@ void MainWindow::request_capture_annotation(const QString & outcome)
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
     const QString transport_error = reply->errorString();
     reply->deleteLater();
+    capture_annotation_in_progress_ = false;
     const QJsonDocument document = QJsonDocument::fromJson(payload);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
@@ -1170,10 +1236,12 @@ void MainWindow::request_capture_annotation(const QString & outcome)
         response.value(QStringLiteral("error")).toString() : transport_error;
       capture_status_value_->setText(QStringLiteral("Outcome not saved: %1").arg(
         error.isEmpty() ? QStringLiteral("backend unavailable") : error));
+      update_capture_toggle();
       return;
     }
     capture_status_value_->setText(QStringLiteral("Outcome saved: %1 (%2 episode(s))").arg(
       outcome, QString::number(response.value(QStringLiteral("episode_indices")).toArray().size())));
+    update_capture_toggle();
     request_dashboard_state();
   });
 }
@@ -1312,6 +1380,7 @@ void MainWindow::update_capture_toggle()
   }
   capture_toggle_button_->setText(capture_running_ ?
     QStringLiteral("Stop Capture") : QStringLiteral("Start Capture"));
+  capture_toggle_button_->setEnabled(!capture_annotation_in_progress_);
   capture_toggle_button_->setStyleSheet(capture_running_ ?
     QStringLiteral("color:#fff4df; border-color:#e4c778; background:#9c2a40;") : QString());
   if (clean_dataset_button_ != nullptr) {
@@ -1336,9 +1405,9 @@ void MainWindow::request_dataset_cleaning()
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   const QJsonObject payload{
     {QStringLiteral("dataset_dir"), capture_dataset_path_},
-    {QStringLiteral("target_fps"), 30.0},
+    {QStringLiteral("target_fps"), 15.0},
     {QStringLiteral("max_sync_delta_s"), 0.02},
-    {QStringLiteral("fps_tolerance_ratio"), 0.3},
+    {QStringLiteral("fps_tolerance_ratio"), 0.5},
   };
   const auto reply = network_->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1542,7 +1611,7 @@ void MainWindow::start_lerobot_export(
     {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
     {QStringLiteral("output_dir"), output_dir},
     {QStringLiteral("profile"), profile},
-    {QStringLiteral("fps"), 30.0},
+    {QStringLiteral("fps"), 15.0},
     {QStringLiteral("cameras"), QJsonArray{QStringLiteral("external"), QStringLiteral("wrist")}},
   };
   const auto reply = network_->post(
@@ -1895,6 +1964,207 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
     load_replay_camera(QStringLiteral("external"), external_camera_label_, external_replay_camera_timestamp_);
     load_replay_camera(QStringLiteral("wrist"), wrist_camera_label_, wrist_replay_camera_timestamp_);
   }
+}
+
+void MainWindow::start_control_services()
+{
+  if (control_services_state_ != ControlServicesState::Stopped) {
+    return;
+  }
+  if (mode_status_received_) {
+    control_services_status_value_->setText(
+      QStringLiteral("Mode Manager is externally managed; start unavailable"));
+    update_control_services_button();
+    return;
+  }
+
+  control_services_state_ = ControlServicesState::CheckingExternalApi;
+  control_services_status_value_->setText(QStringLiteral("Checking HTTP API ownership..."));
+  control_services_timeout_timer_->start(1500);
+  update_control_services_button();
+  check_control_api_health();
+}
+
+void MainWindow::check_control_api_health()
+{
+  const auto reply = network_->get(QNetworkRequest(QUrl(QString::fromLatin1(kControlApiHealthUrl))));
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const bool healthy = reply->error() == QNetworkReply::NoError;
+    reply->deleteLater();
+    if (control_services_state_ == ControlServicesState::CheckingExternalApi) {
+      control_services_timeout_timer_->stop();
+      if (healthy) {
+        control_services_state_ = ControlServicesState::Stopped;
+        control_services_status_value_->setText(
+          QStringLiteral("HTTP API is externally managed; start unavailable"));
+        update_control_services_button();
+        return;
+      }
+
+      control_api_pid_ = 0;
+      if (!QProcess::startDetached(
+          QStringLiteral("ros2"),
+          {QStringLiteral("run"), QStringLiteral("ur5e_http_api"), QStringLiteral("run_api")},
+          QString(), &control_api_pid_))
+      {
+        fail_control_services_start(QStringLiteral("Could not start HTTP API"));
+        return;
+      }
+      services_owned_ = true;
+      control_services_state_ = ControlServicesState::StartingApi;
+      control_services_status_value_->setText(QStringLiteral("Starting HTTP API..."));
+      control_services_timeout_timer_->start(10000);
+      update_control_services_button();
+      QTimer::singleShot(250, this, &MainWindow::check_control_api_health);
+      return;
+    }
+
+    if (control_services_state_ != ControlServicesState::StartingApi) {
+      return;
+    }
+    if (healthy) {
+      start_control_mode_manager();
+      return;
+    }
+    QTimer::singleShot(250, this, &MainWindow::check_control_api_health);
+  });
+}
+
+void MainWindow::start_control_mode_manager()
+{
+  if (control_services_state_ != ControlServicesState::StartingApi) {
+    return;
+  }
+  if (!process_is_running(control_api_pid_)) {
+    fail_control_services_start(QStringLiteral("HTTP API exited before becoming ready"));
+    return;
+  }
+  control_mode_manager_pid_ = 0;
+  if (!QProcess::startDetached(
+      QStringLiteral("ros2"),
+      {QStringLiteral("run"), QStringLiteral("ur5e_mode_manager"), QStringLiteral("mode_manager")},
+      QString(), &control_mode_manager_pid_))
+  {
+    fail_control_services_start(QStringLiteral("Could not start Mode Manager"));
+    return;
+  }
+  control_services_state_ = ControlServicesState::StartingModeManager;
+  control_services_status_value_->setText(QStringLiteral("Starting Mode Manager..."));
+  control_services_timeout_timer_->start(10000);
+  update_control_services_button();
+}
+
+void MainWindow::stop_control_services()
+{
+  if (control_services_state_ != ControlServicesState::Running || !services_owned_) {
+    control_services_status_value_->setText(
+      QStringLiteral("Control services are externally managed; stop unavailable"));
+    update_control_services_button();
+    return;
+  }
+  control_services_state_ = ControlServicesState::WaitingForIdle;
+  control_services_status_value_->setText(QStringLiteral("Requesting IDLE before shutdown..."));
+  control_services_timeout_timer_->start(10000);
+  update_control_services_button();
+  request_mode(QStringLiteral("idle"));
+}
+
+void MainWindow::stop_owned_mode_manager()
+{
+  if (control_services_state_ != ControlServicesState::WaitingForIdle) {
+    return;
+  }
+  control_services_state_ = ControlServicesState::StoppingModeManager;
+  control_services_status_value_->setText(QStringLiteral("Stopping owned Mode Manager..."));
+  update_control_services_button();
+  request_process_stop(control_mode_manager_pid_);
+  check_owned_control_processes_stopped();
+}
+
+void MainWindow::stop_owned_control_api()
+{
+  control_services_state_ = ControlServicesState::StoppingApi;
+  control_services_status_value_->setText(QStringLiteral("Stopping owned HTTP API..."));
+  update_control_services_button();
+  request_process_stop(control_api_pid_);
+  check_owned_control_processes_stopped();
+}
+
+void MainWindow::check_owned_control_processes_stopped()
+{
+  if (control_services_state_ == ControlServicesState::StoppingModeManager) {
+    if (process_is_running(control_mode_manager_pid_)) {
+      QTimer::singleShot(100, this, &MainWindow::check_owned_control_processes_stopped);
+      return;
+    }
+    control_mode_manager_pid_ = 0;
+    stop_owned_control_api();
+    return;
+  }
+  if (control_services_state_ == ControlServicesState::StoppingApi) {
+    if (process_is_running(control_api_pid_)) {
+      QTimer::singleShot(100, this, &MainWindow::check_owned_control_processes_stopped);
+      return;
+    }
+    control_api_pid_ = 0;
+    services_owned_ = false;
+    mode_status_received_ = false;
+    control_services_timeout_timer_->stop();
+    control_services_state_ = ControlServicesState::Stopped;
+    control_services_status_value_->setText(QStringLiteral("Control services stopped"));
+    update_control_services_button();
+  }
+}
+
+void MainWindow::fail_control_services_start(const QString & reason)
+{
+  control_services_timeout_timer_->stop();
+  request_process_stop(control_mode_manager_pid_);
+  request_process_stop(control_api_pid_);
+  control_mode_manager_pid_ = 0;
+  control_api_pid_ = 0;
+  services_owned_ = false;
+  control_services_state_ = ControlServicesState::Stopped;
+  control_services_status_value_->setText(QStringLiteral("Control-service start failed: %1").arg(reason));
+  update_control_services_button();
+}
+
+void MainWindow::update_control_services_button()
+{
+  if (control_services_button_ == nullptr) {
+    return;
+  }
+  const bool running = control_services_state_ == ControlServicesState::Running && services_owned_;
+  control_services_button_->setText(running ?
+    QStringLiteral("Stop control services") : QStringLiteral("Start control services"));
+  control_services_button_->setEnabled(
+    control_services_state_ == ControlServicesState::Stopped || running);
+}
+
+void MainWindow::handle_control_services_timeout()
+{
+  if (control_services_state_ == ControlServicesState::CheckingExternalApi) {
+    control_services_state_ = ControlServicesState::Stopped;
+    control_services_status_value_->setText(QStringLiteral("HTTP API ownership check timed out"));
+  } else if (
+    control_services_state_ == ControlServicesState::StartingApi ||
+    control_services_state_ == ControlServicesState::StartingModeManager)
+  {
+    fail_control_services_start(QStringLiteral("startup timed out"));
+    return;
+  } else if (control_services_state_ == ControlServicesState::WaitingForIdle) {
+    control_services_state_ = ControlServicesState::Running;
+    control_services_status_value_->setText(
+      QStringLiteral("Stop timed out: Mode Manager did not confirm IDLE"));
+  } else if (
+    control_services_state_ == ControlServicesState::StoppingModeManager ||
+    control_services_state_ == ControlServicesState::StoppingApi)
+  {
+    control_services_state_ = ControlServicesState::Running;
+    control_services_status_value_->setText(
+      QStringLiteral("Stop timed out: owned process is still running"));
+  }
+  update_control_services_button();
 }
 
 void MainWindow::request_mode(const QString & mode)

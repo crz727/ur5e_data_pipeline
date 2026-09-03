@@ -65,14 +65,14 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert 'QStringLiteral("/api/capture/export-lerobot")' in main_window
     assert 'QStringLiteral("profile")' in main_window
     assert 'path == QStringLiteral("/api/capture/start")' in main_window
-    assert '{QStringLiteral("sample_rate_hz"), 30.0}' in main_window
+    assert '{QStringLiteral("sample_rate_hz"), 15.0}' in main_window
     assert '{QStringLiteral("sampling_clock"), QStringLiteral("scene_camera_header")}' in main_window
     assert '{QStringLiteral("camera_sync_tolerance_s"), 0.02}' in main_window
     assert '{QStringLiteral("joint_state_sync_tolerance_s"), 0.02}' in main_window
     assert '{QStringLiteral("gripper_sync_tolerance_s"), 0.03}' in main_window
-    assert '{QStringLiteral("target_fps"), 30.0}' in main_window
+    assert '{QStringLiteral("target_fps"), 15.0}' in main_window
     assert '{QStringLiteral("max_sync_delta_s"), 0.02}' in main_window
-    assert '{QStringLiteral("fps"), 30.0}' in main_window
+    assert '{QStringLiteral("fps"), 15.0}' in main_window
     assert 'QStringLiteral("Capture could not start: %1")' in main_window
     assert "connect(dialog, &QFileDialog::rejected" in main_window
     assert "show_temporary_capture_status" in main_window
@@ -167,6 +167,10 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert "dialog_buttons->addWidget(success)" in main_window
     assert "dialog_buttons->addWidget(failure)" in main_window
     assert "dialog_buttons->addWidget(cancel)" in main_window
+    assert "capture_annotation_in_progress_" in main_window
+    assert "capture_annotation_in_progress_ = true;" in main_window
+    assert "capture_annotation_in_progress_ = false;" in main_window
+    assert "!capture_annotation_in_progress_" in main_window
 
     main_cpp = (PANEL_ROOT / "src" / "main.cpp").read_text(encoding="utf-8")
     assert "window.show();" in main_cpp
@@ -270,3 +274,44 @@ def test_lerobot_export_uses_indeterminate_activity_indicator():
     assert "set_lerobot_export_activity(true);" in start_method
     assert "set_lerobot_export_activity(false);" in start_method
     assert status_method.count("set_lerobot_export_activity(false);") == 2
+
+
+def test_panel_control_services_manage_only_owned_api_and_mode_manager():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert "void start_control_services();" in header
+    assert "void stop_control_services();" in header
+    assert "qint64 control_api_pid_" in header
+    assert "qint64 control_mode_manager_pid_" in header
+    assert "QPushButton * control_services_button_" in header
+    assert "void MainWindow::start_control_services()" in main_window
+    assert "void MainWindow::stop_control_services()" in main_window
+    assert 'QStringLiteral("Start control services")' in main_window
+    assert 'QStringLiteral("Stop control services")' in main_window
+    assert 'QStringLiteral("ur5e_http_api")' in main_window
+    assert 'QStringLiteral("run_api")' in main_window
+    assert 'QStringLiteral("ur5e_mode_manager")' in main_window
+    assert 'QStringLiteral("mode_manager")' in main_window
+    assert "QProcess::startDetached" in main_window
+
+    stop_method = main_window[main_window.index("void MainWindow::stop_control_services()") :]
+    lifecycle_source = main_window[main_window.index("void MainWindow::start_control_services()") :]
+    assert 'request_mode(QStringLiteral("idle"))' in stop_method
+    assert 'state == QStringLiteral("IDLE")' in main_window
+    assert 'owner == QStringLiteral("none")' in main_window
+    assert "services_owned_" in main_window
+
+    for forbidden_command in (
+        'QStringLiteral("ur_robot_driver")',
+        'QStringLiteral("ur_control.launch.py")',
+        'QStringLiteral("ros2_control")',
+        'QStringLiteral("camera")',
+        'QStringLiteral("gripper")',
+        'QStringLiteral("run_autonomous.py")',
+    ):
+        assert forbidden_command not in lifecycle_source
