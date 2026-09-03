@@ -101,7 +101,10 @@ class LeRobotDatasetWriter:
 
     def close_episode(self) -> None:
         """Save the current episode."""
-        self.dataset.save_episode()
+        # The exporter runs inside a ROS/Flask worker thread. Avoid forking a
+        # ProcessPoolExecutor from that multithreaded process while encoding
+        # the two camera streams; serial encoding is slower but deterministic.
+        self.dataset.save_episode(parallel_encoding=False)
         self._episode_task = None
 
     def finalize(self) -> None:

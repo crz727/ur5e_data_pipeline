@@ -30,6 +30,27 @@ DASHBOARD_TELEMETRY_TOPICS = {
 }
 
 
+def start_dashboard_server(app, host: str, port: int):
+    """Start a controllable Werkzeug server and return it with its thread."""
+    from werkzeug.serving import make_server
+
+    server = make_server(host, int(port), app, threaded=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        name="data_collection_dashboard_http",
+        daemon=True,
+    )
+    thread.start()
+    return server, thread
+
+
+def stop_dashboard_server(server, thread) -> None:
+    """Stop the HTTP server and wait for its worker thread to exit."""
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5.0)
+
+
 def web_dashboard_node_main(args=None):
     """Start the ROS2-backed read-only Web dashboard."""
     import rclpy
@@ -39,6 +60,9 @@ def web_dashboard_node_main(args=None):
     from std_msgs.msg import String
 
     rclpy.init(args=args)
+    server = None
+    server_thread = None
+    capture_manager = None
     try:
         node = rclpy.create_node("data_collection_web_dashboard")
         _declare_parameters(node)
@@ -90,23 +114,22 @@ def web_dashboard_node_main(args=None):
             else None
         )
         app = create_dashboard_app(store, capture_manager=capture_manager)
-        server = threading.Thread(
-            target=app.run,
-            kwargs={
-                "host": host,
-                "port": port,
-                "debug": False,
-                "use_reloader": False,
-                "threaded": True,
-            },
-            daemon=True,
-        )
-        server.start()
+        try:
+            server, server_thread = start_dashboard_server(app, host, port)
+        except OSError as exc:
+            node.get_logger().error(
+                f"Could not bind dashboard to {host}:{port}: {exc}"
+            )
+            return
         node.get_logger().info(
             f"data_collection Web dashboard started on http://{host}:{port}"
         )
         rclpy.spin(node)
     finally:
+        if capture_manager is not None:
+            capture_manager.close()
+        if server is not None and server_thread is not None:
+            stop_dashboard_server(server, server_thread)
         rclpy.shutdown()
 
 

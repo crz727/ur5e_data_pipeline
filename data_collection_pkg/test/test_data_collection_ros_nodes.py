@@ -1,6 +1,7 @@
 import inspect
 import json
 import pytest
+import socket
 from types import SimpleNamespace
 
 import data_collection_pkg.action_replay.ursim_rviz_adapter_node as ursim_rviz
@@ -8,6 +9,21 @@ import data_collection_pkg.hardware_check.hardware_interface_check_node as hardw
 import data_collection_pkg.ros_capture.collector_node as collector_node
 import data_collection_pkg.ros_capture.teleop_bridge_node as teleop_bridge
 import data_collection_pkg.visualization.web_dashboard_node as web_dashboard_node
+
+
+def test_dashboard_server_lifecycle_releases_bound_port():
+    server, thread = web_dashboard_node.start_dashboard_server(
+        lambda _request: None,
+        "127.0.0.1",
+        0,
+    )
+    port = server.server_port
+    assert thread.is_alive()
+
+    web_dashboard_node.stop_dashboard_server(server, thread)
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", port))
 
 
 def test_ros_node_module_imports_without_ros2_installed():
@@ -28,6 +44,7 @@ def test_ros_nodes_keep_rclpy_imports_inside_startup_functions():
     before_dashboard_start = dashboard_source.split("def web_dashboard_node_main", 1)[0]
 
     assert "import rclpy" not in before_dashboard_start
+    assert "capture_manager.close()" in dashboard_source
 
     hardware_source = inspect.getsource(hardware_check)
     before_hardware_start = hardware_source.split("def hardware_interface_check_node_main", 1)[0]

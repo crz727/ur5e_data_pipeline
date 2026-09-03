@@ -1,0 +1,160 @@
+数据采集与 Qt UI 改动报告
+=========================
+
+日期：2026-08-18
+范围：data_collection_pkg、data_collection_rviz_panel
+
+一、LeRobot 转换中途停止修复
+----------------------------
+
+问题现象
+~~~~~~~~
+Qt UI 点击 LeRobot 转换后，转换通常在第 31 个 episode 附近停止。失败目录中只有部分
+episode 元数据和未完成的图像临时文件，不能作为完整训练数据使用。
+
+根因
+~~~~
+LeRobot 0.4.4 的 LeRobotDataset.save_episode() 默认使用 ProcessPoolExecutor 并行编码
+视频。转换任务运行在 ROS/Flask Dashboard 的后台线程中，在多线程进程内重复创建视频编码
+子进程存在不稳定的 fork/资源交互风险。
+
+代码改动
+~~~~~~~~
+1. data_collection_pkg/data_collection_pkg/dataset/lerobot_writer.py
+   close_episode() 显式调用 save_episode(parallel_encoding=False)，两路视频改为串行编码。
+   该改动不改变 LeRobot 数据格式、相机字段、episode 结构或 UI/API 接口。
+
+2. data_collection_pkg/data_collection_pkg/visualization/capture_manager.py
+   后台转换线程捕获未预期异常，并将异步任务状态更新为 failed，保存异常类型和错误信息，
+   避免线程直接退出后 UI 永久显示 running。
+
+3. 测试同步
+   更新 LeRobotDataset 测试替身，使其支持 parallel_encoding 参数，并增加断言确认串行编码。
+   增加后台转换异常状态回归测试。
+
+验证结果
+~~~~~~~~
+1. Python 数据包全量测试：221 passed。
+2. Qt contract 测试：17 passed。
+3. 真实 cleaned 数据转换验证：32 个 episode、5347 帧、两路 H.264 视频。
+   结果：ok=true，skipped_count=0，issues=[]。
+4. 生成了 data_collection_export_report.json，输出校验通过。
+
+部署和使用注意
+~~~~~~~~~~~~~~
+1. 失败的旧输出目录不能继续追加转换；应选择新的 output_dir。
+2. 真机部署需要重新构建 data_collection_pkg，并重新 source install/setup.bash。
+3. 串行视频编码比并行编码慢，但在 Dashboard/ROS 后台线程环境下稳定性更高。
+
+二、Dashboard 8765 端口残留修复
+--------------------------------
+
+问题现象
+~~~~~~~~
+关闭或异常退出 Qt UI 后，重新启动 UI 时出现：
+
+  OSError: [Errno 98] Address already in use
+  QIODevice::read (QNetworkReplyHttpImpl): device not open
+  Dashboard disconnected
+
+根因
+~~~~
+data_collection_web_dashboard_node 将 Flask app.run() 放入 daemon 线程，但节点退出时只调用
+rclpy.shutdown()，没有显式关闭 HTTP server。与此同时，Qt launch 中关闭面板进程不会自动
+关闭同一 launch 内 include 的 Dashboard，导致旧进程继续占用 127.0.0.1:8765。
+
+代码改动
+~~~~~~~~
+1. data_collection_pkg/data_collection_pkg/visualization/web_dashboard_node.py
+   使用 Werkzeug make_server 创建可控 HTTP server。
+   新增 start_dashboard_server() 和 stop_dashboard_server()。
+   节点退出时执行 server.shutdown()、server.server_close() 并等待服务线程退出。
+   端口绑定失败时在 ROS 日志中明确报告 host、port 和异常，而不是让后台线程静默失败。
+
+2. data_collection_rviz_panel/launch/data_collection_rviz_panel.launch.py
+   Qt 面板 Node 增加 on_exit=Shutdown(...)。
+   Qt 面板退出后，整个 launch 会关闭，包含 Dashboard、拓扑监控和状态发布节点，避免
+   Dashboard 进程残留占用 8765。
+
+3. 测试同步
+   增加 HTTP server 端口释放测试。
+   增加 Qt 面板退出触发 launch Shutdown 的 contract 测试。
+
+验证结果
+~~~~~~~~
+1. Dashboard server 生命周期测试通过，停止后同一端口可重新 bind。
+2. Python 数据包全量测试：221 passed。
+3. Qt contract 测试：17 passed。
+4. web_dashboard_node.py 和 Qt launch 文件通过 py_compile。
+
+部署后的正确启动方式
+~~~~~~~~~~~~~~~~~~~~~~
+1. 只启动一次完整 Qt launch，不要同时单独启动 data_collection_monitor.launch.py。
+2. 关闭 UI 面板后等待 launch 退出，再重新启动。
+3. 如果历史残留进程已经存在，首次仍需手动确认：
+
+   ss -ltnp | grep ':8765'
+   ps -ww -fp <PID>
+   kill -INT <PID>
+
+   等待端口释放后再启动 UI。确认 PID 确实属于旧 Dashboard 后，才可使用 SIGTERM 或
+   SIGKILL 作为后续措施，避免误杀其他服务。
+
+4. 如果必须使用外部已运行的 Dashboard，不要再启动包含同一个 Dashboard 的完整 launch。
+
+未包含在本次改动中的内容
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. 没有修改 LeRobot 输出格式或清洗规则。
+2. 没有修改 CaptureManager 只启动 collector 的边界。
+3. 没有自动杀死未知进程；端口占用者可能是其他合法服务，必须先检查 PID。
+4. 工作区中此前已有的未提交改动和 docs/superpowers 文件未被回滚或覆盖。
+
+三、高风险进程生命周期问题修复
+--------------------------------
+
+问题一：CaptureManager 并发启动竞态
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+问题现象
+^^^^^^^^
+Dashboard 的多个请求同时点击开始采集，可能都在 collector 尚未返回 PID 时通过
+“当前未运行”检查，最终启动两个 collector。CaptureManager 只记录最后一个进程，
+前一个进程无法再由 UI Stop 管理，造成后台采集进程遗留。
+
+代码改动
+^^^^^^^^
+1. data_collection_pkg/data_collection_pkg/visualization/capture_manager.py
+   增加采集生命周期锁，串行保护 start、stop、new_task 和已有数据集选择操作。
+2. 增加启动中状态，覆盖 Popen 返回前的窗口；并发 start 请求只能有一个进入启动流程，
+   其余请求返回 capture already running。
+3. 增加并发启动回归测试，使用阻塞式 Popen 验证实际只调用一次 collector。
+
+问题二：Dashboard/Qt 退出后子进程遗留
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+问题现象
+^^^^^^^^
+关闭 Dashboard 或 Qt UI 后，collector、HTTP API、Mode Manager 可能继续运行，导致
+下一次启动时端口占用、外部管理状态或重复进程问题。
+
+代码改动
+^^^^^^^^
+1. CaptureManager 增加 close() 方法。Dashboard 节点退出时调用它，停止正在运行的
+   collector、关闭日志，并等待后台 LeRobot 导出线程；常规等待失败时执行强制终止兜底。
+   close() 可重复调用，不会因已经停止而报错。
+2. web_dashboard_node.py 在所有退出路径的 finally 中调用 capture_manager.close()，
+   同时保留 HTTP server 和 ROS 资源释放流程。
+3. Qt MainWindow 析构时，仅对当前 UI 自己启动或接管的 API/Mode Manager 执行同步清理：
+   SIGINT -> 等待 -> SIGTERM -> 等待 -> SIGKILL，并回收直接子进程。
+4. 外部管理的 API、Mode Manager 不会被 Qt 析构函数自动杀死，保持原有进程边界。
+
+最新验证结果
+^^^^^^^^^^^^^^
+1. Python 数据包全量测试：223 passed。
+2. Qt contract 测试：17 passed。
+3. colcon build --packages-select data_collection_pkg data_collection_rviz_panel：构建成功。
+4. git diff --check 和 Python 语法检查通过。
+
+部署注意
+^^^^^^^^^^
+1. 重新构建后必须重新 source 对应的 install/setup.bash。
+2. 关闭 Qt 后应等待 launch 退出；若进程来自外部 launch，仍需按 PID 和命令行确认后
+   单独停止，Qt 不会误杀这些外部进程。

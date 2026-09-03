@@ -6,7 +6,12 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <spawn.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <utility>
+#include <vector>
 
 #include <QByteArray>
 #include <QApplication>
@@ -17,7 +22,9 @@
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QEvent>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
@@ -38,7 +45,6 @@
 #include <QPainterPath>
 #include <QPlainTextEdit>
 #include <QProgressBar>
-#include <QProcess>
 #include <QPushButton>
 #include <QKeySequence>
 #include <QMenu>
@@ -51,6 +57,7 @@
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSplitter>
+#include <QStringList>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTimer>
@@ -80,11 +87,18 @@ constexpr char kModeTopic[] = "/control_mode";
 constexpr char kModeStatusTopic[] = "/control_mode/status";
 constexpr char kReplayJointStateTopic[] = "/data_collection/replay/joint_states";
 constexpr char kControlApiHealthUrl[] = "http://127.0.0.1:5000/api/health";
+constexpr int kMaxLerobotExportStatusRetries = 5;
 
 bool process_is_running(qint64 pid)
 {
   if (pid <= 0) {
     return false;
+  }
+  // Reap the direct child when it exits; otherwise a stopped service remains a zombie
+  // and kill(pid, 0) would incorrectly keep the Qt lifecycle state alive.
+  (void)::waitpid(static_cast<pid_t>(pid), nullptr, WNOHANG);
+  if (::kill(-static_cast<pid_t>(pid), 0) == 0 || errno == EPERM) {
+    return true;
   }
   if (::kill(static_cast<pid_t>(pid), 0) == 0) {
     return true;
@@ -92,11 +106,126 @@ bool process_is_running(qint64 pid)
   return errno == EPERM;
 }
 
-void request_process_stop(qint64 pid)
+qint64 start_owned_process(const QString & program, const QStringList & arguments)
+{
+  std::vector<QByteArray> encoded;
+  encoded.reserve(static_cast<std::size_t>(arguments.size()) + 1U);
+  encoded.push_back(program.toLocal8Bit());
+  for (const QString & argument : arguments) {
+    encoded.push_back(argument.toLocal8Bit());
+  }
+  std::vector<char *> argv;
+  argv.reserve(encoded.size() + 1U);
+  for (QByteArray & value : encoded) {
+    argv.push_back(value.data());
+  }
+  argv.push_back(nullptr);
+
+  posix_spawnattr_t attributes;
+  if (::posix_spawnattr_init(&attributes) != 0) {
+    return 0;
+  }
+  const short flags = POSIX_SPAWN_SETSID;
+  if (::posix_spawnattr_setflags(&attributes, flags) != 0) {
+    ::posix_spawnattr_destroy(&attributes);
+    return 0;
+  }
+  pid_t child = 0;
+  const int result = ::posix_spawnp(
+    &child, argv[0], nullptr, &attributes, argv.data(), environ);
+  ::posix_spawnattr_destroy(&attributes);
+  return result == 0 ? static_cast<qint64>(child) : 0;
+}
+
+struct ResidualControlServices
+{
+  qint64 mode_manager_pid{0};
+  qint64 http_api_pid{0};
+
+  bool empty() const
+  {
+    return mode_manager_pid <= 0 && http_api_pid <= 0;
+  }
+};
+
+bool has_executable_argument(const QList<QByteArray> & arguments, const QByteArray & executable)
+{
+  for (const QByteArray & argument : arguments) {
+    if (argument == executable || argument.endsWith(QByteArrayLiteral("/") + executable)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+ResidualControlServices find_residual_control_services()
+{
+  ResidualControlServices residual;
+  const QDir proc(QStringLiteral("/proc"));
+  const uint current_uid = static_cast<uint>(::geteuid());
+  for (const QString & entry : proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+    bool valid_pid = false;
+    const qint64 pid = entry.toLongLong(&valid_pid);
+    if (!valid_pid || pid <= 0 || QFileInfo(proc.filePath(entry)).ownerId() != current_uid) {
+      continue;
+    }
+    QFile command_file(proc.filePath(entry + QStringLiteral("/cmdline")));
+    if (!command_file.open(QIODevice::ReadOnly)) {
+      continue;
+    }
+    const QByteArray command_line = command_file.readAll();
+    const QList<QByteArray> arguments = command_line.split('\0');
+    if (residual.mode_manager_pid == 0 &&
+      command_line.contains(QByteArrayLiteral("ur5e_mode_manager")) &&
+      has_executable_argument(arguments, QByteArrayLiteral("mode_manager")))
+    {
+      residual.mode_manager_pid = pid;
+    }
+    if (residual.http_api_pid == 0 &&
+      command_line.contains(QByteArrayLiteral("ur5e_http_api")) &&
+      has_executable_argument(arguments, QByteArrayLiteral("run_api")))
+    {
+      residual.http_api_pid = pid;
+    }
+  }
+  return residual;
+}
+
+void request_process_stop(qint64 pid, int signal = SIGINT)
 {
   if (pid > 0 && process_is_running(pid)) {
-    ::kill(static_cast<pid_t>(pid), SIGINT);
+    if (::kill(-static_cast<pid_t>(pid), signal) != 0 && errno == ESRCH) {
+      ::kill(static_cast<pid_t>(pid), signal);
+    }
   }
+}
+
+void stop_process_synchronously(qint64 pid)
+{
+  if (pid <= 0) {
+    return;
+  }
+  const auto wait_for_exit = [pid](int attempts) {
+      for (int attempt = 0; attempt < attempts; ++attempt) {
+        if (!process_is_running(pid)) {
+          return true;
+        }
+        ::usleep(20'000);
+      }
+      return !process_is_running(pid);
+    };
+
+  request_process_stop(pid, SIGINT);
+  if (wait_for_exit(50)) {
+    return;
+  }
+  request_process_stop(pid, SIGTERM);
+  if (wait_for_exit(50)) {
+    return;
+  }
+  request_process_stop(pid, SIGKILL);
+  (void)wait_for_exit(25);
+  (void)::waitpid(static_cast<pid_t>(pid), nullptr, WNOHANG);
 }
 
 QString pretty_json(const QJsonValue & value)
@@ -516,6 +645,11 @@ QLabel * make_value_label(const QString & value = QStringLiteral("waiting"))
   return label;
 }
 
+void configure_network_request(QNetworkRequest & request, int timeout_ms)
+{
+  request.setTransferTimeout(timeout_ms);
+}
+
 QLabel * make_health_label()
 {
   auto * label = new QLabel;
@@ -587,6 +721,16 @@ MainWindow::MainWindow(QWidget * parent)
   control_services_timeout_timer_->setSingleShot(true);
   connect(control_services_timeout_timer_, &QTimer::timeout, this,
     &MainWindow::handle_control_services_timeout);
+  mode_status_stale_timer_ = new QTimer(this);
+  mode_status_stale_timer_->setSingleShot(true);
+  connect(mode_status_stale_timer_, &QTimer::timeout, this, [this]() {
+    mode_status_received_ = false;
+    set_mode_buttons_enabled(true);
+    if (control_services_state_ == ControlServicesState::Stopped) {
+      control_services_status_value_->setText(QStringLiteral("Mode Manager status unavailable"));
+    }
+    update_control_services_button();
+  });
   update_control_services_button();
 
   state_timer_ = new QTimer(this);
@@ -597,6 +741,15 @@ MainWindow::MainWindow(QWidget * parent)
 
 MainWindow::~MainWindow()
 {
+  // The destructor cannot rely on QTimer callbacks. Only terminate services
+  // spawned by this window; externally managed services remain untouched.
+  if (services_owned_) {
+    stop_process_synchronously(control_mode_manager_pid_);
+    stop_process_synchronously(control_api_pid_);
+    control_mode_manager_pid_ = 0;
+    control_api_pid_ = 0;
+    services_owned_ = false;
+  }
   if (rviz_manager_) {
     rviz_manager_->stopUpdate();
   }
@@ -696,21 +849,18 @@ void MainWindow::build_ui()
   mode_owner_value_ = make_value_label();
   mode_step_value_ = make_value_label();
   mode_fault_value_ = make_value_label(QStringLiteral("none"));
+  control_services_status_value_ = make_value_label(
+    QStringLiteral("Control services not started"));
+  control_services_status_value_->setWordWrap(true);
   const QList<QPair<QString, QLabel *>> mode_rows = {
     {QStringLiteral("Current mode"), mode_value_}, {QStringLiteral("State"), mode_state_value_},
     {QStringLiteral("Owner"), mode_owner_value_}, {QStringLiteral("Step"), mode_step_value_},
-    {QStringLiteral("Fault"), mode_fault_value_}};
+    {QStringLiteral("Fault"), mode_fault_value_},
+    {QStringLiteral("Services"), control_services_status_value_}};
   for (int index = 0; index < mode_rows.size(); ++index) {
     mode_status_layout->addRow(new QLabel(mode_rows[index].first), mode_rows[index].second);
   }
   mode_layout->addWidget(mode_status_frame);
-  idle_button_ = new QPushButton(QStringLiteral("IDLE"));
-  auto_button_ = new QPushButton(QStringLiteral("AUTO"));
-  api_button_ = new QPushButton(QStringLiteral("API"));
-  teleop_button_ = new QPushButton(QStringLiteral("TELEOP"));
-  const QList<QPair<QPushButton *, QString>> mode_buttons = {
-    {idle_button_, QStringLiteral("idle")}, {auto_button_, QStringLiteral("auto")},
-    {api_button_, QStringLiteral("api")}, {teleop_button_, QStringLiteral("teleop")}};
   auto * mode_actions_frame = new QFrame(mode_box);
   mode_actions_frame->setObjectName(QStringLiteral("mode_actions_panel"));
   mode_actions_frame->setStyleSheet(QStringLiteral("QFrame#mode_actions_panel { border:1px solid #6f542b; border-radius:3px; background:#111216; }"));
@@ -720,32 +870,35 @@ void MainWindow::build_ui()
   mode_buttons_layout->setVerticalSpacing(8);
   mode_buttons_layout->setColumnStretch(0, 1);
   mode_buttons_layout->setColumnStretch(1, 1);
+  for (int row = 0; row < 4; ++row) {
+    mode_buttons_layout->setRowMinimumHeight(row, 36);
+  }
+  mode_actions_frame->setMinimumHeight(188);
+  control_services_button_ = new QPushButton(QStringLiteral("Start"), mode_actions_frame);
+  stop_control_services_button_ = new QPushButton(QStringLiteral("Stop"), mode_actions_frame);
+  idle_button_ = new QPushButton(QStringLiteral("Pause"), mode_actions_frame);
+  auto_button_ = new QPushButton(QStringLiteral("AUTO"), mode_actions_frame);
+  api_button_ = new QPushButton(QStringLiteral("API"), mode_actions_frame);
+  teleop_button_ = new QPushButton(QStringLiteral("TELEOP"), mode_actions_frame);
+  hil_button_ = new QPushButton(QStringLiteral("Hil_teleop"), mode_actions_frame);
+  const QList<QPair<QPushButton *, QString>> mode_buttons = {
+    {auto_button_, QStringLiteral("auto")}, {api_button_, QStringLiteral("api")},
+    {teleop_button_, QStringLiteral("teleop")}, {hil_button_, QStringLiteral("hil_teleop")}};
+  connect(control_services_button_, &QPushButton::clicked, this, &MainWindow::start_control_services);
+  connect(stop_control_services_button_, &QPushButton::clicked, this, &MainWindow::stop_control_services);
+  connect(idle_button_, &QPushButton::clicked, this, [this]() { request_mode(QStringLiteral("idle")); });
+  mode_buttons_layout->addWidget(control_services_button_, 0, 0);
+  mode_buttons_layout->addWidget(stop_control_services_button_, 0, 1);
   for (int index = 0; index < mode_buttons.size(); ++index) {
     mode_buttons[index].first->setMinimumHeight(36);
-    mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2, index % 2);
+    mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2 + 1, index % 2);
     connect(mode_buttons[index].first, &QPushButton::clicked, this,
       [this, mode = mode_buttons[index].second]() { request_mode(mode); });
   }
+  idle_button_->setMinimumHeight(36);
+  mode_buttons_layout->addWidget(idle_button_, 3, 0, 1, 2);
   mode_layout->addWidget(mode_actions_frame);
-  auto * control_services_frame = new QFrame(mode_box);
-  control_services_frame->setObjectName(QStringLiteral("control_services_panel"));
-  control_services_frame->setStyleSheet(QStringLiteral(
-    "QFrame#control_services_panel { border:1px solid #6f542b; border-radius:3px; background:#111216; }"));
-  auto * control_services_layout = new QHBoxLayout(control_services_frame);
-  control_services_status_value_ = make_value_label(QStringLiteral("Control services not started"));
-  control_services_button_ = new QPushButton(QStringLiteral("Start control services"), control_services_frame);
-  control_services_status_value_->setWordWrap(true);
-  control_services_layout->addWidget(control_services_status_value_, 1);
-  control_services_layout->addWidget(control_services_button_);
-  connect(control_services_button_, &QPushButton::clicked, this, [this]() {
-    if (control_services_state_ == ControlServicesState::Running && services_owned_) {
-      stop_control_services();
-    } else if (control_services_state_ == ControlServicesState::Stopped) {
-      start_control_services();
-    }
-  });
-  mode_layout->addWidget(control_services_frame);
-  mode_box->setMinimumHeight(315);
+  mode_box->setMinimumHeight(420);
   operation_layout->addWidget(mode_box);
 
   auto * capture_box = new QGroupBox(QStringLiteral("Capture"), operation_column);
@@ -773,7 +926,7 @@ void MainWindow::build_ui()
   capture_layout->addWidget(new_task, 2, 0);
   capture_layout->addWidget(capture_toggle_button_, 2, 1);
   capture_layout->addWidget(clean_dataset_button_, 2, 2);
-  capture_layout->addWidget(continue_dataset_button_, 3, 0, 1, 2);
+  capture_layout->addWidget(continue_dataset_button_, 3, 1);
   capture_layout->addWidget(convert_lerobot_button_, 3, 2);
   capture_layout->addWidget(new QLabel(QStringLiteral("Write status")), 4, 0);
   capture_layout->addWidget(capture_status_value_, 4, 1, 1, 2);
@@ -984,13 +1137,14 @@ void MainWindow::initialize_ros()
         const QString state = status.value(QStringLiteral("state")).toString();
         const QString owner = status.value(QStringLiteral("owner")).toString();
         mode_status_received_ = true;
+        mode_status_stale_timer_->start(1500);
         mode_value_->setText(status.value(QStringLiteral("current_mode")).toString());
         mode_state_value_->setText(state);
         mode_owner_value_->setText(owner);
         mode_step_value_->setText(status.value(QStringLiteral("step")).toString());
         mode_fault_value_->setText(status.value(QStringLiteral("fault")).toString(QStringLiteral("none")));
         const bool switching = state == QStringLiteral("SWITCHING");
-        for (QPushButton * button : {idle_button_, auto_button_, api_button_, teleop_button_}) { button->setEnabled(!switching); }
+        set_mode_buttons_enabled(!switching);
         if (control_services_state_ == ControlServicesState::StartingModeManager) {
           control_services_timeout_timer_->stop();
           control_services_state_ = ControlServicesState::Running;
@@ -1032,51 +1186,67 @@ void MainWindow::initialize_ros()
     [this](const sensor_msgs::msg::JointState::SharedPtr message) {
       robot_model_joint_state_publisher_->publish(*message);
     });
-  external_camera_subscription_ = node_->create_subscription<sensor_msgs::msg::CompressedImage>(kExternalCameraTopic, 10,
+  external_camera_subscription_ = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
+    kExternalCameraTopic, rclcpp::SensorDataQoS(),
     [this](const sensor_msgs::msg::CompressedImage::SharedPtr message) { update_camera(external_camera_label_, *message); });
-  wrist_camera_subscription_ = node_->create_subscription<sensor_msgs::msg::CompressedImage>(kWristCameraTopic, 10,
+  wrist_camera_subscription_ = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
+    kWristCameraTopic, rclcpp::SensorDataQoS(),
     [this](const sensor_msgs::msg::CompressedImage::SharedPtr message) { update_camera(wrist_camera_label_, *message); });
 
   executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   executor_->add_node(node_);
+  executor_thread_ = std::thread([this]() { executor_->spin(); });
 }
 
 void MainWindow::initialize_rviz()
 {
-  rviz_rendering::RenderSystem::get();
-  rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>("data_collection_rviz_panel_rviz");
-  rviz_frame_ = new rviz_common::VisualizationFrame(rviz_node_);
-  rviz_frame_->setApp(qobject_cast<QApplication *>(QApplication::instance()));
-  rviz_frame_->setSplashPath(QString());
-  rviz_layout_->setContentsMargins(0, 0, 0, 0);
-  rviz_layout_->addWidget(rviz_frame_);
-  rviz_frame_->initialize(rviz_node_);
-  rviz_frame_->setHideButtonVisibility(false);
-  rviz_frame_->menuBar()->hide();
-  rviz_frame_->statusBar()->hide();
-  for (QDockWidget * dock : rviz_frame_->findChildren<QDockWidget *>()) {
-    dock->hide();
+  try {
+    rviz_rendering::RenderSystem::get();
+    rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>("data_collection_rviz_panel_rviz");
+    rviz_frame_ = new rviz_common::VisualizationFrame(rviz_node_);
+    rviz_frame_->setApp(qobject_cast<QApplication *>(QApplication::instance()));
+    rviz_frame_->setSplashPath(QString());
+    rviz_layout_->setContentsMargins(0, 0, 0, 0);
+    rviz_layout_->addWidget(rviz_frame_);
+    rviz_frame_->initialize(rviz_node_);
+    rviz_frame_->setHideButtonVisibility(false);
+    rviz_frame_->menuBar()->hide();
+    rviz_frame_->statusBar()->hide();
+    for (QDockWidget * dock : rviz_frame_->findChildren<QDockWidget *>()) {
+      dock->hide();
+    }
+    for (QToolBar * toolbar : rviz_frame_->findChildren<QToolBar *>()) {
+      toolbar->hide();
+    }
+    rviz_manager_ = rviz_frame_->getManager();
+    rviz_manager_->setFixedFrame(QStringLiteral("base_link"));
+    rviz_manager_->createDisplay(QStringLiteral("rviz_default_plugins/Grid"), QStringLiteral("Grid"), true);
+    live_model_ = rviz_manager_->createDisplay(
+      QStringLiteral("rviz_default_plugins/RobotModel"), QStringLiteral("UR5e RobotModel"), true);
+    if (auto * live_description_topic = live_model_->subProp(QStringLiteral("Description Topic"))) {
+      live_description_topic->setValue(QStringLiteral("/robot_description"));
+    }
+    replay_model_ = rviz_manager_->createDisplay(
+      QStringLiteral("rviz_default_plugins/RobotModel"), QStringLiteral("Replay RobotModel"), false);
+    if (auto * tf_prefix = replay_model_->subProp(QStringLiteral("TF Prefix"))) {
+      tf_prefix->setValue(QStringLiteral("replay"));
+    }
+    if (auto * description_topic = replay_model_->subProp(QStringLiteral("Description Topic"))) {
+      description_topic->setValue(QStringLiteral("/replay/robot_description"));
+    }
+  } catch (const std::exception & error) {
+    if (rviz_frame_ != nullptr) {
+      delete rviz_frame_;
+      rviz_frame_ = nullptr;
+    }
+    rviz_manager_ = nullptr;
+    auto * message = new QLabel(
+      QStringLiteral("RViz unavailable: %1").arg(QString::fromLocal8Bit(error.what())),
+      rviz_layout_->parentWidget());
+    message->setWordWrap(true);
+    message->setAlignment(Qt::AlignCenter);
+    rviz_layout_->addWidget(message);
   }
-  for (QToolBar * toolbar : rviz_frame_->findChildren<QToolBar *>()) {
-    toolbar->hide();
-  }
-  rviz_manager_ = rviz_frame_->getManager();
-  rviz_manager_->setFixedFrame(QStringLiteral("base_link"));
-  rviz_manager_->createDisplay(QStringLiteral("rviz_default_plugins/Grid"), QStringLiteral("Grid"), true);
-  live_model_ = rviz_manager_->createDisplay(
-    QStringLiteral("rviz_default_plugins/RobotModel"), QStringLiteral("UR5e RobotModel"), true);
-  if (auto * live_description_topic = live_model_->subProp(QStringLiteral("Description Topic"))) {
-    live_description_topic->setValue(QStringLiteral("/robot_description"));
-  }
-  replay_model_ = rviz_manager_->createDisplay(
-    QStringLiteral("rviz_default_plugins/RobotModel"), QStringLiteral("Replay RobotModel"), false);
-  if (auto * tf_prefix = replay_model_->subProp(QStringLiteral("TF Prefix"))) {
-    tf_prefix->setValue(QStringLiteral("replay"));
-  }
-  if (auto * description_topic = replay_model_->subProp(QStringLiteral("Description Topic"))) {
-    description_topic->setValue(QStringLiteral("/replay/robot_description"));
-  }
-  executor_thread_ = std::thread([this]() { executor_->spin(); });
 }
 
 void MainWindow::update_camera(QLabel * label, const sensor_msgs::msg::CompressedImage & image)
@@ -1092,11 +1262,18 @@ void MainWindow::update_camera(QLabel * label, const sensor_msgs::msg::Compresse
 
 void MainWindow::request_dashboard_state()
 {
-  const auto reply = network_->get(QNetworkRequest(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/state"))));
+  if (dashboard_state_request_in_flight_) {
+    return;
+  }
+  dashboard_state_request_in_flight_ = true;
+  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/state")));
+  configure_network_request(request, 1500);
+  const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QByteArray payload = reply->readAll();
     const bool ok = reply->error() == QNetworkReply::NoError;
     reply->deleteLater();
+    dashboard_state_request_in_flight_ = false;
     if (!ok) {
       connection_label_->setText(QStringLiteral("dashboard backend disconnected"));
       return;
@@ -1112,6 +1289,7 @@ void MainWindow::post_json(const QString & path, const QJsonObject & payload)
 {
   QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + path));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+  configure_network_request(request, 5000);
   const auto reply = network_->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
   connect(reply, &QNetworkReply::finished, this, [this, path, reply]() {
     const QByteArray response = reply->readAll();
@@ -1120,6 +1298,30 @@ void MainWindow::post_json(const QString & path, const QJsonObject & payload)
     reply->deleteLater();
     const QJsonDocument document = QJsonDocument::fromJson(response);
     const QJsonObject response_object = document.object();
+    if (path == QStringLiteral("/api/capture/select-existing-dataset")) {
+      if (!transport_ok || !document.isObject() ||
+        !response_object.value(QStringLiteral("ok")).toBool())
+      {
+        const QString error = document.isObject() ?
+          response_object.value(QStringLiteral("error")).toString() : transport_error;
+        show_temporary_capture_status(QStringLiteral("Could not select dataset: %1").arg(
+          error.isEmpty() ? QStringLiteral("backend unavailable") : error));
+        return;
+      }
+      apply_existing_dataset_selection(response_object);
+    }
+    if (path == QStringLiteral("/api/capture/new-task")) {
+      if (!transport_ok || !document.isObject() ||
+        !response_object.value(QStringLiteral("ok")).toBool())
+      {
+        const QString error = document.isObject() ?
+          response_object.value(QStringLiteral("error")).toString() : transport_error;
+        show_temporary_capture_status(QStringLiteral("Could not create task: %1").arg(
+          error.isEmpty() ? QStringLiteral("backend unavailable") : error));
+        return;
+      }
+      clear_capture_dataset_selection();
+    }
     if (path == QStringLiteral("/api/capture/start") &&
       (!transport_ok || !document.isObject() ||
       !response_object.value(QStringLiteral("ok")).toBool()))
@@ -1142,6 +1344,50 @@ void MainWindow::post_json(const QString & path, const QJsonObject & payload)
   });
 }
 
+void MainWindow::clear_capture_dataset_selection()
+{
+  capture_dataset_path_.clear();
+  dataset_path_value_->setText(QStringLiteral("Dataset Path -"));
+  capture_task_id_.clear();
+  capture_language_instruction_en_.clear();
+  capture_language_instruction_zh_.clear();
+  capture_task_id_is_suggested_ = false;
+  continued_dataset_annotation_dirty_ = false;
+  capture_task_->setEnabled(true);
+  language_instruction_button_->setText(QStringLiteral("Language: not set"));
+}
+
+void MainWindow::apply_existing_dataset_selection(const QJsonObject & capture)
+{
+  continued_dataset_annotation_dirty_ = false;
+  const QString selected_dataset = capture.value(QStringLiteral("dataset_dir")).toString();
+  if (!selected_dataset.isEmpty()) {
+    capture_dataset_path_ = selected_dataset;
+    dataset_path_value_->setText(QStringLiteral("Dataset Path %1").arg(capture_dataset_path_));
+  }
+  capture_mode_->setEnabled(true);
+  capture_task_->setEnabled(false);
+  const QString selected_mode = capture.value(QStringLiteral("runtime_mode")).toString();
+  const int mode_index = capture_mode_->findText(selected_mode, Qt::MatchFixedString);
+  if (mode_index >= 0) {
+    capture_mode_->setCurrentIndex(mode_index);
+  }
+  const QString selected_task = capture.value(QStringLiteral("task")).toString();
+  if (!selected_task.isEmpty()) {
+    capture_task_->setText(selected_task);
+  }
+  const QJsonObject annotation = capture.value(QStringLiteral("task_annotation")).toObject();
+  capture_task_id_ = annotation.value(QStringLiteral("task_id")).toString();
+  capture_language_instruction_en_ = annotation.value(QStringLiteral("language_instruction_en")).toString();
+  capture_language_instruction_zh_ = annotation.value(QStringLiteral("language_instruction_zh")).toString();
+  capture_task_id_is_suggested_ = !capture_task_id_.isEmpty() &&
+    capture_task_id_ == suggest_task_id(capture_language_instruction_en_);
+  language_instruction_button_->setText(
+    capture_task_id_.isEmpty() && capture_language_instruction_en_.isEmpty() &&
+    capture_language_instruction_zh_.isEmpty() ?
+    QStringLiteral("Language: not set") : QStringLiteral("Language: ready"));
+}
+
 void MainWindow::show_temporary_capture_status(const QString & status)
 {
   capture_status_override_active_ = true;
@@ -1158,16 +1404,22 @@ void MainWindow::show_temporary_capture_status(const QString & status)
 
 void MainWindow::request_capture_stop_and_annotation()
 {
-  capture_toggle_button_->setEnabled(false);
+  if (capture_stop_in_progress_) {
+    return;
+  }
+  capture_stop_in_progress_ = true;
+  update_capture_toggle();
   QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/stop")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+  configure_network_request(request, 10000);
   const auto reply = network_->post(request, QByteArrayLiteral("{}"));
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QByteArray payload = reply->readAll();
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
     const QString transport_error = reply->errorString();
     reply->deleteLater();
-    capture_toggle_button_->setEnabled(true);
+    capture_stop_in_progress_ = false;
+    update_capture_toggle();
     const QJsonDocument document = QJsonDocument::fromJson(payload);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject() || !response.value(QStringLiteral("ok")).toBool()) {
@@ -1227,6 +1479,7 @@ void MainWindow::request_capture_annotation(const QString & outcome)
   capture_status_value_->setText(QStringLiteral("Saving capture outcome..."));
   QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/annotate")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+  configure_network_request(request, 10000);
   const QJsonObject annotation_payload{{QStringLiteral("outcome"), outcome}};
   const auto reply = network_->post(
     request, QJsonDocument(annotation_payload).toJson(QJsonDocument::Compact));
@@ -1260,8 +1513,10 @@ void MainWindow::request_language_instruction_editor()
   }
   language_editor_request_in_progress_ = true;
   update_capture_toggle();
-  const auto reply = network_->get(QNetworkRequest(
-    QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/task-labels"))));
+  QNetworkRequest request(QUrl(
+    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/task-labels")));
+  configure_network_request(request, 5000);
+  const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QByteArray body = reply->readAll();
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
@@ -1325,6 +1580,15 @@ void MainWindow::show_language_instruction_editor(const QJsonArray & labels)
     english->setPlainText(label.value(QStringLiteral("language_instruction_en")).toString());
     chinese->setPlainText(label.value(QStringLiteral("language_instruction_zh")).toString());
   };
+  if (!capture_task_id_.isEmpty()) {
+    const int index = task_id->findText(capture_task_id_, Qt::MatchFixedString);
+    if (index >= 0) {
+      task_id->setCurrentIndex(index);
+    } else {
+      task_id->setEditText(capture_task_id_);
+    }
+  }
+
   connect(task_id, &QComboBox::currentTextChanged, &dialog,
     [task_id, fill_known_label](const QString & text) {
       const int index = task_id->findText(text, Qt::MatchFixedString);
@@ -1334,17 +1598,8 @@ void MainWindow::show_language_instruction_editor(const QJsonArray & labels)
       }
     });
 
-  if (!capture_task_id_.isEmpty()) {
-    const int index = task_id->findText(capture_task_id_, Qt::MatchFixedString);
-    if (index >= 0) {
-      task_id->setCurrentIndex(index);
-      fill_known_label();
-    } else {
-      task_id->setEditText(capture_task_id_);
-    }
-  }
-
-  auto previous_suggestion = std::make_shared<QString>();
+  auto previous_suggestion = std::make_shared<QString>(
+    capture_task_id_is_suggested_ ? capture_task_id_ : QString());
   connect(english, &QPlainTextEdit::textChanged, &dialog,
     [task_id, english, previous_suggestion]() {
       const QString current_id = task_id->currentText().trimmed();
@@ -1374,6 +1629,9 @@ void MainWindow::show_language_instruction_editor(const QJsonArray & labels)
   if (capture_task_id_.isEmpty() && !capture_language_instruction_en_.isEmpty()) {
     capture_task_id_ = suggest_task_id(capture_language_instruction_en_);
   }
+  capture_task_id_is_suggested_ = !capture_task_id_.isEmpty() &&
+    capture_task_id_ == suggest_task_id(capture_language_instruction_en_);
+  continued_dataset_annotation_dirty_ = true;
   const bool language_ready = !capture_task_id_.isEmpty() ||
     !capture_language_instruction_en_.isEmpty() || !capture_language_instruction_zh_.isEmpty();
   language_instruction_button_->setText(language_ready ?
@@ -1387,7 +1645,9 @@ void MainWindow::update_capture_toggle()
   }
   capture_toggle_button_->setText(capture_running_ ?
     QStringLiteral("Stop Capture") : QStringLiteral("Start Capture"));
-  capture_toggle_button_->setEnabled(!capture_annotation_in_progress_);
+  capture_toggle_button_->setEnabled(
+    !capture_stop_in_progress_ && !capture_annotation_in_progress_ &&
+    !cleaning_in_progress_ && !lerobot_export_in_progress_);
   capture_toggle_button_->setStyleSheet(capture_running_ ?
     QStringLiteral("color:#fff4df; border-color:#e4c778; background:#9c2a40;") : QString());
   if (clean_dataset_button_ != nullptr) {
@@ -1416,6 +1676,7 @@ void MainWindow::request_dataset_cleaning()
     {QStringLiteral("max_sync_delta_s"), 0.02},
     {QStringLiteral("fps_tolerance_ratio"), 0.5},
   };
+  configure_network_request(request, 120000);
   const auto reply = network_->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QByteArray body = reply->readAll();
@@ -1509,46 +1770,59 @@ void MainWindow::request_lerobot_export(
   dialog->setOption(QFileDialog::ShowDirsOnly, true);
   dialog->setOption(QFileDialog::DontUseNativeDialog, true);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
-  connect(dialog, &QFileDialog::rejected, this, [this]() {
+  connect(dialog, &QDialog::rejected, this, [this, profile_label]() {
     lerobot_export_in_progress_ = false;
-    request_dashboard_state();
+    show_temporary_capture_status(QStringLiteral("%1 export output directory selection cancelled").arg(
+      profile_label));
   });
-  connect(dialog, &QFileDialog::fileSelected, this,
-    [this, cleaned_dataset_dir, normalized_profile, profile_label](const QString & output_parent) {
-    bool accepted = false;
-    QString default_output_name = normalized_profile == QStringLiteral("vla") ?
-      QStringLiteral("lerobot_vla_v3") : QStringLiteral("lerobot_act_v3");
-    QString suggested_output_name = default_output_name;
-    int suffix = 1;
-    while (QDir(output_parent).exists(suggested_output_name)) {
-      suggested_output_name = QStringLiteral("%1_%2").arg(default_output_name).arg(suffix++);
-    }
-    const QString output_name = QInputDialog::getText(
-      this, QStringLiteral("%1 Output Name").arg(profile_label), QStringLiteral("Directory name"),
-      QLineEdit::Normal, suggested_output_name, &accepted).trimmed();
-    if (!accepted || output_name.isEmpty()) {
+  connect(dialog, &QDialog::accepted, this,
+    [this, dialog, cleaned_dataset_dir, normalized_profile, profile_label]() {
+    const QStringList selected_files = dialog->selectedFiles();
+    if (selected_files.isEmpty()) {
       lerobot_export_in_progress_ = false;
-      request_dashboard_state();
+      show_temporary_capture_status(QStringLiteral("%1 export output directory selection missing").arg(
+        profile_label));
       return;
     }
-    if (output_name.contains(QLatin1Char('/'))) {
-      lerobot_export_in_progress_ = false;
-      show_temporary_capture_status(
-        QStringLiteral("%1 export output name cannot contain '/'").arg(profile_label));
-      return;
-    }
-    const QString output_dir = QDir(output_parent).filePath(output_name);
-    if (QDir(output_dir).exists()) {
-      lerobot_export_in_progress_ = false;
-      show_temporary_capture_status(
-        QStringLiteral("%1 export output already exists; choose a new name").arg(profile_label));
-      return;
-    }
-    if (normalized_profile == QStringLiteral("vla")) {
-      request_lerobot_export_preflight(cleaned_dataset_dir, normalized_profile, output_dir);
-      return;
-    }
-    start_lerobot_export(cleaned_dataset_dir, normalized_profile, output_dir);
+    const QString output_parent = selected_files.constFirst();
+    QTimer::singleShot(0, this,
+      [this, cleaned_dataset_dir, normalized_profile, profile_label, output_parent]() {
+      bool accepted = false;
+      const QString default_output_name = normalized_profile == QStringLiteral("vla") ?
+        QStringLiteral("lerobot_vla_v3") : QStringLiteral("lerobot_act_v3");
+      QString suggested_output_name = default_output_name;
+      int suffix = 1;
+      while (QDir(output_parent).exists(suggested_output_name)) {
+        suggested_output_name = QStringLiteral("%1_%2").arg(default_output_name).arg(suffix++);
+      }
+      const QString output_name = QInputDialog::getText(
+        this, QStringLiteral("%1 Output Name").arg(profile_label), QStringLiteral("Directory name"),
+        QLineEdit::Normal, suggested_output_name, &accepted).trimmed();
+      if (!accepted || output_name.isEmpty()) {
+        lerobot_export_in_progress_ = false;
+        show_temporary_capture_status(QStringLiteral("%1 export output name selection cancelled").arg(
+          profile_label));
+        return;
+      }
+      if (output_name.contains(QLatin1Char('/'))) {
+        lerobot_export_in_progress_ = false;
+        show_temporary_capture_status(
+          QStringLiteral("%1 export output name cannot contain '/'").arg(profile_label));
+        return;
+      }
+      const QString output_dir = QDir(output_parent).filePath(output_name);
+      if (QDir(output_dir).exists()) {
+        lerobot_export_in_progress_ = false;
+        show_temporary_capture_status(
+          QStringLiteral("%1 export output already exists; choose a new name").arg(profile_label));
+        return;
+      }
+      if (normalized_profile == QStringLiteral("vla")) {
+        request_lerobot_export_preflight(cleaned_dataset_dir, normalized_profile, output_dir);
+        return;
+      }
+      start_lerobot_export(cleaned_dataset_dir, normalized_profile, output_dir);
+    });
   });
   dialog->open();
 }
@@ -1565,6 +1839,7 @@ void MainWindow::request_lerobot_export_preflight(
     {QStringLiteral("output_dir"), output_dir},
     {QStringLiteral("profile"), profile},
   };
+  configure_network_request(request, 120000);
   const auto reply = network_->post(
     request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
   connect(reply, &QNetworkReply::finished, this,
@@ -1591,10 +1866,22 @@ void MainWindow::request_lerobot_export_preflight(
     const QString message = QStringLiteral(
       "Eligible episodes: %1\nSkipped episodes: %2\n\nPlanned report:\n%3\n\nStart VLA export?")
       .arg(eligible_count).arg(skipped_count).arg(planned_report_path);
-    const auto choice = QMessageBox::question(
-      this, QStringLiteral("Confirm VLA Export"), message,
-      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    if (choice != QMessageBox::Yes) {
+    QDialog vla_confirm_dialog(this);
+    vla_confirm_dialog.setWindowTitle(QStringLiteral("Confirm VLA Export"));
+    auto * vla_confirm_layout = new QVBoxLayout(&vla_confirm_dialog);
+    auto * vla_confirm_message = new QLabel(message, &vla_confirm_dialog);
+    vla_confirm_message->setWordWrap(true);
+    vla_confirm_layout->addWidget(vla_confirm_message);
+    auto * vla_confirm_buttons = new QHBoxLayout;
+    auto * vla_confirm_yes = new QPushButton(QStringLiteral("Yes"), &vla_confirm_dialog);
+    auto * vla_confirm_no = new QPushButton(QStringLiteral("No"), &vla_confirm_dialog);
+    vla_confirm_yes->setDefault(true);
+    vla_confirm_buttons->addWidget(vla_confirm_yes);
+    vla_confirm_buttons->addWidget(vla_confirm_no);
+    vla_confirm_layout->addLayout(vla_confirm_buttons);
+    connect(vla_confirm_yes, &QPushButton::clicked, &vla_confirm_dialog, &QDialog::accept);
+    connect(vla_confirm_no, &QPushButton::clicked, &vla_confirm_dialog, &QDialog::reject);
+    if (vla_confirm_dialog.exec() != QDialog::Accepted) {
       lerobot_export_in_progress_ = false;
       show_temporary_capture_status(QStringLiteral("VLA export cancelled"));
       return;
@@ -1609,6 +1896,7 @@ void MainWindow::start_lerobot_export(
   const QString profile_label = profile.toUpper();
   lerobot_export_profile_ = profile;
   lerobot_export_in_progress_ = true;
+  lerobot_export_status_retry_count_ = 0;
   set_lerobot_export_activity(true);
   capture_status_value_->setText(QStringLiteral("%1 export queued...").arg(profile_label));
   QNetworkRequest request(QUrl(
@@ -1621,6 +1909,7 @@ void MainWindow::start_lerobot_export(
     {QStringLiteral("fps"), 15.0},
     {QStringLiteral("cameras"), QJsonArray{QStringLiteral("external"), QStringLiteral("wrist")}},
   };
+  configure_network_request(request, 5000);
   const auto reply = network_->post(
     request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
   connect(reply, &QNetworkReply::finished, this, [this, profile_label, reply]() {
@@ -1647,8 +1936,10 @@ void MainWindow::start_lerobot_export(
 void MainWindow::request_lerobot_export_status()
 {
   const QString profile_label = lerobot_export_profile_.toUpper();
-  const auto reply = network_->get(QNetworkRequest(
-    QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot/status"))));
+  QNetworkRequest request(QUrl(
+    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot/status")));
+  configure_network_request(request, 3000);
+  const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, profile_label, reply]() {
     const QByteArray body = reply->readAll();
     const bool transport_ok = reply->error() == QNetworkReply::NoError;
@@ -1657,6 +1948,15 @@ void MainWindow::request_lerobot_export_status()
     const QJsonDocument document = QJsonDocument::fromJson(body);
     const QJsonObject response = document.object();
     if (!transport_ok || !document.isObject()) {
+      ++lerobot_export_status_retry_count_;
+      if (lerobot_export_status_retry_count_ >= kMaxLerobotExportStatusRetries) {
+        lerobot_export_in_progress_ = false;
+        set_lerobot_export_activity(false);
+        show_temporary_capture_status(QStringLiteral(
+          "%1 export status unavailable after retries: %2").arg(profile_label,
+          transport_ok ? QStringLiteral("invalid backend response") : transport_error));
+        return;
+      }
       const QString status_error = transport_ok ?
         QStringLiteral("invalid backend response") : transport_error;
       show_temporary_capture_status(QStringLiteral("%1 export status unavailable: %2").arg(
@@ -1666,11 +1966,13 @@ void MainWindow::request_lerobot_export_status()
     }
     const QString status = response.value(QStringLiteral("status")).toString();
     if (status == QStringLiteral("queued") || status == QStringLiteral("running")) {
+      lerobot_export_status_retry_count_ = 0;
       capture_status_value_->setText(QStringLiteral("%1 export %2...").arg(profile_label, status));
       QTimer::singleShot(500, this, &MainWindow::request_lerobot_export_status);
       return;
     }
     if (status == QStringLiteral("done")) {
+      lerobot_export_status_retry_count_ = 0;
       lerobot_export_in_progress_ = false;
       set_lerobot_export_activity(false);
       const QJsonObject result = response.value(QStringLiteral("result")).toObject();
@@ -1683,11 +1985,20 @@ void MainWindow::request_lerobot_export_status()
       return;
     }
     if (status == QStringLiteral("failed")) {
+      lerobot_export_status_retry_count_ = 0;
       lerobot_export_in_progress_ = false;
       set_lerobot_export_activity(false);
       show_temporary_capture_status(QStringLiteral("%1 export failed: %2").arg(
         profile_label,
         response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error"))));
+      return;
+    }
+    ++lerobot_export_status_retry_count_;
+    if (lerobot_export_status_retry_count_ >= kMaxLerobotExportStatusRetries) {
+      lerobot_export_in_progress_ = false;
+      set_lerobot_export_activity(false);
+      show_temporary_capture_status(QStringLiteral(
+        "%1 export status unavailable after retries: unknown status").arg(profile_label));
       return;
     }
     show_temporary_capture_status(QStringLiteral(
@@ -1725,7 +2036,9 @@ void MainWindow::request_replay_episodes()
   QUrlQuery query;
   query.addQueryItem(QStringLiteral("dataset_dir"), dataset_dir);
   url.setQuery(query);
-  const auto reply = network_->get(QNetworkRequest(url));
+  QNetworkRequest request(url);
+  configure_network_request(request, 10000);
+  const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QByteArray payload = reply->readAll();
     const QString transport_error = reply->errorString();
@@ -1792,29 +2105,17 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
   const QString capture_dataset_path = capture.value(QStringLiteral("dataset_dir")).toString();
   if (!capture_dataset_path.isEmpty()) {
     capture_dataset_path_ = capture_dataset_path;
+  } else if (!capture_running && !capture.value(QStringLiteral("selected_existing_dataset")).toBool(false)) {
+    capture_dataset_path_.clear();
   }
   dataset_path_value_->setText(QStringLiteral("Dataset Path %1").arg(
     capture_dataset_path_.isEmpty() ? QStringLiteral("-") : capture_dataset_path_));
   const bool selected_existing = capture.value(QStringLiteral("selected_existing_dataset")).toBool(false);
-  capture_mode_->setEnabled(!selected_existing && !capture_running_);
-  if (selected_existing && !capture_running_) {
-    const QString selected_mode = capture.value(QStringLiteral("runtime_mode")).toString();
-    const int mode_index = capture_mode_->findText(selected_mode, Qt::MatchFixedString);
-    if (mode_index >= 0) {
-      capture_mode_->setCurrentIndex(mode_index);
-    }
-    const QString selected_task = capture.value(QStringLiteral("task")).toString();
-    if (!selected_task.isEmpty()) {
-      capture_task_->setText(selected_task);
-    }
-    const QJsonObject annotation = capture.value(QStringLiteral("task_annotation")).toObject();
-    capture_task_id_ = annotation.value(QStringLiteral("task_id")).toString();
-    capture_language_instruction_en_ = annotation.value(QStringLiteral("language_instruction_en")).toString();
-    capture_language_instruction_zh_ = annotation.value(QStringLiteral("language_instruction_zh")).toString();
-    language_instruction_button_->setText(
-      capture_task_id_.isEmpty() && capture_language_instruction_en_.isEmpty() &&
-      capture_language_instruction_zh_.isEmpty() ?
-      QStringLiteral("Language: not set") : QStringLiteral("Language: ready"));
+  capture_mode_->setEnabled(!capture_running_);
+  if (selected_existing && !capture_running_ && capture_task_->isEnabled() &&
+    !continued_dataset_annotation_dirty_)
+  {
+    apply_existing_dataset_selection(capture);
   }
   update_capture_toggle();
   if (replay_dataset_path_->text().isEmpty() && !capture_dataset_path_.isEmpty()) {
@@ -1977,8 +2278,10 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
     const double timestamp = camera.value(QStringLiteral("last_timestamp")).toDouble(-1.0);
     if (!camera.value(QStringLiteral("valid")).toBool() || timestamp <= last_timestamp) { return; }
     last_timestamp = timestamp;
-    const auto reply = network_->get(QNetworkRequest(QUrl(
-      QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/camera/") + name)));
+    QNetworkRequest request(QUrl(
+      QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/camera/") + name));
+    configure_network_request(request, 3000);
+    const auto reply = network_->get(request);
     connect(reply, &QNetworkReply::finished, this, [reply, label]() {
       QImage image;
       image.loadFromData(reply->readAll());
@@ -2021,25 +2324,40 @@ void MainWindow::request_standalone_lerobot_export()
   dialog->setOption(QFileDialog::ShowDirsOnly, true);
   dialog->setOption(QFileDialog::DontUseNativeDialog, true);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
-  connect(dialog, &QFileDialog::fileSelected, this, [this](const QString & dataset_dir) {
-    QDir parent(dataset_dir);
-    parent.cdUp();
-    QDir stage(parent);
-    stage.cdUp();
-    if (QFileInfo(dataset_dir).fileName() != QStringLiteral("qpos_gripper") ||
-      stage.dirName() != QStringLiteral("cleaned") ||
-      !QFileInfo(QDir(dataset_dir).filePath(QStringLiteral("meta/episodes.jsonl"))).isFile())
-    {
-      show_temporary_capture_status(QStringLiteral("Select cleaned/<mode>/qpos_gripper with episode metadata"));
+  connect(dialog, &QDialog::rejected, this, [this]() {
+    show_temporary_capture_status(QStringLiteral("LeRobot export dataset selection cancelled"));
+  });
+  connect(dialog, &QDialog::accepted, this, [this, dialog]() {
+    const QStringList selected_files = dialog->selectedFiles();
+    if (selected_files.isEmpty()) {
+      show_temporary_capture_status(QStringLiteral("LeRobot export dataset selection missing"));
       return;
     }
-    bool accepted = false;
-    const QString profile = QInputDialog::getItem(
-      this, QStringLiteral("LeRobot Profile"), QStringLiteral("Profile"),
-      {QStringLiteral("ACT"), QStringLiteral("VLA")}, 0, false, &accepted);
-    if (accepted) {
-      request_lerobot_export(dataset_dir, profile.toLower());
-    }
+    const QString dataset_dir = selected_files.constFirst();
+    QTimer::singleShot(0, this, [this, dataset_dir]() {
+      QDir parent(dataset_dir);
+      parent.cdUp();
+      QDir stage(parent);
+      stage.cdUp();
+      if (QFileInfo(dataset_dir).fileName() != QStringLiteral("qpos_gripper") ||
+        stage.dirName() != QStringLiteral("cleaned") ||
+        !QFileInfo(QDir(dataset_dir).filePath(QStringLiteral("meta/episodes.jsonl"))).isFile())
+      {
+        QMessageBox::warning(this, QStringLiteral("Invalid Export Dataset"),
+          QStringLiteral("Select cleaned/<mode>/qpos_gripper with episode metadata.\n\nSelected:\n%1")
+            .arg(dataset_dir));
+        return;
+      }
+      bool accepted = false;
+      const QString profile = QInputDialog::getItem(
+        this, QStringLiteral("LeRobot Profile"), QStringLiteral("Profile"),
+        {QStringLiteral("ACT"), QStringLiteral("VLA")}, 0, false, &accepted);
+      if (accepted) {
+        request_lerobot_export(dataset_dir, profile.toLower());
+      } else {
+        show_temporary_capture_status(QStringLiteral("LeRobot export profile selection cancelled"));
+      }
+    });
   });
   dialog->open();
 }
@@ -2065,7 +2383,9 @@ void MainWindow::start_control_services()
 
 void MainWindow::check_control_api_health()
 {
-  const auto reply = network_->get(QNetworkRequest(QUrl(QString::fromLatin1(kControlApiHealthUrl))));
+  QNetworkRequest request(QUrl(QString::fromLatin1(kControlApiHealthUrl)));
+  configure_network_request(request, 1500);
+  const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const bool healthy = reply->error() == QNetworkReply::NoError;
     reply->deleteLater();
@@ -2080,10 +2400,10 @@ void MainWindow::check_control_api_health()
       }
 
       control_api_pid_ = 0;
-      if (!QProcess::startDetached(
-          QStringLiteral("ros2"),
-          {QStringLiteral("run"), QStringLiteral("ur5e_http_api"), QStringLiteral("run_api")},
-          QString(), &control_api_pid_))
+      control_api_pid_ = start_owned_process(
+        QStringLiteral("ros2"),
+        {QStringLiteral("run"), QStringLiteral("ur5e_http_api"), QStringLiteral("run_api")});
+      if (control_api_pid_ <= 0)
       {
         fail_control_services_start(QStringLiteral("Could not start HTTP API"));
         return;
@@ -2118,10 +2438,10 @@ void MainWindow::start_control_mode_manager()
     return;
   }
   control_mode_manager_pid_ = 0;
-  if (!QProcess::startDetached(
-      QStringLiteral("ros2"),
-      {QStringLiteral("run"), QStringLiteral("ur5e_mode_manager"), QStringLiteral("mode_manager")},
-      QString(), &control_mode_manager_pid_))
+  control_mode_manager_pid_ = start_owned_process(
+    QStringLiteral("ros2"),
+    {QStringLiteral("run"), QStringLiteral("ur5e_mode_manager"), QStringLiteral("mode_manager")});
+  if (control_mode_manager_pid_ <= 0)
   {
     fail_control_services_start(QStringLiteral("Could not start Mode Manager"));
     return;
@@ -2134,10 +2454,35 @@ void MainWindow::start_control_mode_manager()
 
 void MainWindow::stop_control_services()
 {
-  if (control_services_state_ != ControlServicesState::Running || !services_owned_) {
+  if (!services_owned_) {
+    if (recover_residual_control_services()) {
+      return;
+    }
     control_services_status_value_->setText(
-      QStringLiteral("Control services are externally managed; stop unavailable"));
+      QStringLiteral("No Qt-owned control services to stop"));
     update_control_services_button();
+    return;
+  }
+  if (control_services_state_ == ControlServicesState::StartingApi) {
+    control_services_timeout_timer_->stop();
+    control_services_state_ = ControlServicesState::StoppingApi;
+    control_services_status_value_->setText(QStringLiteral("Stopping owned HTTP API..."));
+    owned_process_stop_attempts_ = 0;
+    request_process_stop(control_api_pid_);
+    check_owned_control_processes_stopped();
+    return;
+  }
+  if (control_services_state_ == ControlServicesState::StartingModeManager) {
+    control_services_timeout_timer_->stop();
+    control_services_state_ = ControlServicesState::StoppingModeManager;
+    control_services_status_value_->setText(QStringLiteral("Stopping owned Mode Manager..."));
+    owned_process_stop_attempts_ = 0;
+    request_process_stop(control_mode_manager_pid_);
+    check_owned_control_processes_stopped();
+    return;
+  }
+  if (control_services_state_ != ControlServicesState::Running) {
+    control_services_status_value_->setText(QStringLiteral("Stop already in progress"));
     return;
   }
   control_services_state_ = ControlServicesState::WaitingForIdle;
@@ -2145,6 +2490,63 @@ void MainWindow::stop_control_services()
   control_services_timeout_timer_->start(10000);
   update_control_services_button();
   request_mode(QStringLiteral("idle"));
+}
+
+bool MainWindow::recover_residual_control_services()
+{
+  const ResidualControlServices residual = find_residual_control_services();
+  if (residual.empty()) {
+    return false;
+  }
+  QStringList services;
+  if (residual.mode_manager_pid > 0) {
+    services.push_back(QStringLiteral("Mode Manager (PID %1)").arg(residual.mode_manager_pid));
+  }
+  if (residual.http_api_pid > 0) {
+    services.push_back(QStringLiteral("HTTP API (PID %1)").arg(residual.http_api_pid));
+  }
+  QDialog recover_dialog(this);
+  recover_dialog.setWindowTitle(QStringLiteral("Recover Residual Services"));
+  auto * recover_dialog_layout = new QVBoxLayout(&recover_dialog);
+  auto * recover_message = new QLabel(
+    QStringLiteral("Stop residual control services started by an earlier UI session?\n\n%1")
+      .arg(services.join(QLatin1Char('\n'))), &recover_dialog);
+  recover_message->setWordWrap(true);
+  recover_dialog_layout->addWidget(recover_message);
+
+  auto * recover_dialog_buttons = new QHBoxLayout;
+  auto * recover_yes = new QPushButton(QStringLiteral("Yes"), &recover_dialog);
+  auto * recover_no = new QPushButton(QStringLiteral("No"), &recover_dialog);
+  recover_yes->setDefault(true);
+  recover_dialog_buttons->addWidget(recover_yes);
+  recover_dialog_buttons->addWidget(recover_no);
+  recover_dialog_layout->addLayout(recover_dialog_buttons);
+  QObject::connect(recover_yes, &QPushButton::clicked, &recover_dialog, &QDialog::accept);
+  QObject::connect(recover_no, &QPushButton::clicked, &recover_dialog, &QDialog::reject);
+
+  if (recover_dialog.exec() != QDialog::Accepted) {
+    control_services_status_value_->setText(QStringLiteral("Residual control services not stopped"));
+    update_control_services_button();
+    return true;
+  }
+
+  control_mode_manager_pid_ = residual.mode_manager_pid;
+  control_api_pid_ = residual.http_api_pid;
+  services_owned_ = true;
+  control_services_timeout_timer_->stop();
+  owned_process_stop_attempts_ = 0;
+  if (control_mode_manager_pid_ > 0) {
+    control_services_state_ = ControlServicesState::StoppingModeManager;
+    control_services_status_value_->setText(QStringLiteral("Stopping residual Mode Manager..."));
+    request_process_stop(control_mode_manager_pid_);
+  } else {
+    control_services_state_ = ControlServicesState::StoppingApi;
+    control_services_status_value_->setText(QStringLiteral("Stopping residual HTTP API..."));
+    request_process_stop(control_api_pid_);
+  }
+  update_control_services_button();
+  check_owned_control_processes_stopped();
+  return true;
 }
 
 void MainWindow::stop_owned_mode_manager()
@@ -2155,6 +2557,7 @@ void MainWindow::stop_owned_mode_manager()
   control_services_state_ = ControlServicesState::StoppingModeManager;
   control_services_status_value_->setText(QStringLiteral("Stopping owned Mode Manager..."));
   update_control_services_button();
+  owned_process_stop_attempts_ = 0;
   request_process_stop(control_mode_manager_pid_);
   check_owned_control_processes_stopped();
 }
@@ -2164,6 +2567,7 @@ void MainWindow::stop_owned_control_api()
   control_services_state_ = ControlServicesState::StoppingApi;
   control_services_status_value_->setText(QStringLiteral("Stopping owned HTTP API..."));
   update_control_services_button();
+  owned_process_stop_attempts_ = 0;
   request_process_stop(control_api_pid_);
   check_owned_control_processes_stopped();
 }
@@ -2172,6 +2576,12 @@ void MainWindow::check_owned_control_processes_stopped()
 {
   if (control_services_state_ == ControlServicesState::StoppingModeManager) {
     if (process_is_running(control_mode_manager_pid_)) {
+      ++owned_process_stop_attempts_;
+      if (owned_process_stop_attempts_ == 30) {
+        request_process_stop(control_mode_manager_pid_, SIGTERM);
+      } else if (owned_process_stop_attempts_ == 60) {
+        request_process_stop(control_mode_manager_pid_, SIGKILL);
+      }
       QTimer::singleShot(100, this, &MainWindow::check_owned_control_processes_stopped);
       return;
     }
@@ -2181,29 +2591,56 @@ void MainWindow::check_owned_control_processes_stopped()
   }
   if (control_services_state_ == ControlServicesState::StoppingApi) {
     if (process_is_running(control_api_pid_)) {
+      ++owned_process_stop_attempts_;
+      if (owned_process_stop_attempts_ == 30) {
+        request_process_stop(control_api_pid_, SIGTERM);
+      } else if (owned_process_stop_attempts_ == 60) {
+        request_process_stop(control_api_pid_, SIGKILL);
+      }
       QTimer::singleShot(100, this, &MainWindow::check_owned_control_processes_stopped);
       return;
     }
     control_api_pid_ = 0;
-    services_owned_ = false;
-    mode_status_received_ = false;
-    control_services_timeout_timer_->stop();
-    control_services_state_ = ControlServicesState::Stopped;
-    control_services_status_value_->setText(QStringLiteral("Control services stopped"));
-    update_control_services_button();
+    finish_control_services_stop(QStringLiteral("Control services stopped"));
   }
 }
 
 void MainWindow::fail_control_services_start(const QString & reason)
 {
   control_services_timeout_timer_->stop();
-  request_process_stop(control_mode_manager_pid_);
-  request_process_stop(control_api_pid_);
+  owned_process_stop_attempts_ = 0;
+  if (control_mode_manager_pid_ > 0) {
+    services_owned_ = true;
+    control_services_state_ = ControlServicesState::StoppingModeManager;
+    control_services_status_value_->setText(QStringLiteral(
+      "Control-service start failed; stopping Mode Manager: %1").arg(reason));
+    request_process_stop(control_mode_manager_pid_);
+    update_control_services_button();
+    check_owned_control_processes_stopped();
+    return;
+  }
+  if (control_api_pid_ > 0) {
+    services_owned_ = true;
+    control_services_state_ = ControlServicesState::StoppingApi;
+    control_services_status_value_->setText(QStringLiteral(
+      "Control-service start failed; stopping HTTP API: %1").arg(reason));
+    request_process_stop(control_api_pid_);
+    update_control_services_button();
+    check_owned_control_processes_stopped();
+    return;
+  }
+  finish_control_services_stop(QStringLiteral("Control-service start failed: %1").arg(reason));
+}
+
+void MainWindow::finish_control_services_stop(const QString & status)
+{
   control_mode_manager_pid_ = 0;
   control_api_pid_ = 0;
   services_owned_ = false;
+  mode_status_received_ = false;
+  control_services_timeout_timer_->stop();
   control_services_state_ = ControlServicesState::Stopped;
-  control_services_status_value_->setText(QStringLiteral("Control-service start failed: %1").arg(reason));
+  control_services_status_value_->setText(status);
   update_control_services_button();
 }
 
@@ -2212,11 +2649,21 @@ void MainWindow::update_control_services_button()
   if (control_services_button_ == nullptr) {
     return;
   }
-  const bool running = control_services_state_ == ControlServicesState::Running && services_owned_;
-  control_services_button_->setText(running ?
-    QStringLiteral("Stop control services") : QStringLiteral("Start control services"));
-  control_services_button_->setEnabled(
-    control_services_state_ == ControlServicesState::Stopped || running);
+  control_services_button_->setText(QStringLiteral("Start"));
+  control_services_button_->setEnabled(control_services_state_ == ControlServicesState::Stopped);
+  if (stop_control_services_button_ != nullptr) {
+    stop_control_services_button_->setText(QStringLiteral("Stop"));
+    stop_control_services_button_->setEnabled(true);
+  }
+}
+
+void MainWindow::set_mode_buttons_enabled(bool enabled)
+{
+  for (QPushButton * button : {idle_button_, auto_button_, api_button_, teleop_button_, hil_button_}) {
+    if (button != nullptr) {
+      button->setEnabled(enabled);
+    }
+  }
 }
 
 void MainWindow::handle_control_services_timeout()
@@ -2231,16 +2678,26 @@ void MainWindow::handle_control_services_timeout()
     fail_control_services_start(QStringLiteral("startup timed out"));
     return;
   } else if (control_services_state_ == ControlServicesState::WaitingForIdle) {
-    control_services_state_ = ControlServicesState::Running;
+    control_services_state_ = ControlServicesState::StoppingModeManager;
+    owned_process_stop_attempts_ = 0;
     control_services_status_value_->setText(
-      QStringLiteral("Stop timed out: Mode Manager did not confirm IDLE"));
+      QStringLiteral("Forcing Mode Manager shutdown (IDLE not confirmed)..."));
+    control_services_timeout_timer_->stop();
+    request_process_stop(control_mode_manager_pid_);
+    check_owned_control_processes_stopped();
+    return;
   } else if (
     control_services_state_ == ControlServicesState::StoppingModeManager ||
     control_services_state_ == ControlServicesState::StoppingApi)
   {
-    control_services_state_ = ControlServicesState::Running;
     control_services_status_value_->setText(
-      QStringLiteral("Stop timed out: owned process is still running"));
+      QStringLiteral("Stop escalation still in progress..."));
+    control_services_timeout_timer_->stop();
+    if (control_services_state_ == ControlServicesState::StoppingModeManager) {
+      request_process_stop(control_mode_manager_pid_, SIGKILL);
+    } else {
+      request_process_stop(control_api_pid_, SIGKILL);
+    }
   }
   update_control_services_button();
 }

@@ -12,6 +12,7 @@ class FakeLeRobotDataset:
     def __init__(self):
         self.frames = []
         self.saved = 0
+        self.save_episode_parallel_encoding = None
         self.finalized = False
 
     @classmethod
@@ -22,8 +23,9 @@ class FakeLeRobotDataset:
     def add_frame(self, frame):
         self.frames.append(frame)
 
-    def save_episode(self):
+    def save_episode(self, *, parallel_encoding=True):
         self.saved += 1
+        self.save_episode_parallel_encoding = parallel_encoding
 
     def finalize(self):
         self.finalized = True
@@ -48,6 +50,7 @@ def test_lerobot_writer_calls_official_dataset_api(tmp_path):
     assert FakeLeRobotDataset.created["repo_id"] == "local/ur5e_pick"
     assert FakeLeRobotDataset.created["root"] == tmp_path / "trainable" / "policy" / "qpos_gripper"
     assert writer.dataset.saved == 1
+    assert writer.dataset.save_episode_parallel_encoding is False
     assert writer.dataset.finalized is True
     assert "timestamp" not in FakeLeRobotDataset.created["features"]
     assert "timestamp" not in writer.dataset.frames[0]

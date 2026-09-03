@@ -17,6 +17,7 @@ class FakeLeRobotDataset:
     def __init__(self):
         self.frames = []
         self.saved = 0
+        self.save_episode_parallel_encoding = None
         self.finalized = False
 
     @classmethod
@@ -27,8 +28,9 @@ class FakeLeRobotDataset:
     def add_frame(self, frame):
         self.frames.append(frame)
 
-    def save_episode(self):
+    def save_episode(self, *, parallel_encoding=True):
         self.saved += 1
+        self.save_episode_parallel_encoding = parallel_encoding
 
     def finalize(self):
         self.finalized = True
