@@ -2,6 +2,7 @@
 
 import json
 import math
+from copy import deepcopy
 from io import BytesIO
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,7 @@ class JsonlDatasetWriter:
         converted_from: Optional[str] = None,
         image_storage_format: str = "jpeg",
         jpeg_quality: int = 75,
+        episode_metadata: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.root = Path(root)
         self.schema: ActionSchema = get_schema(schema_name)
@@ -43,6 +45,7 @@ class JsonlDatasetWriter:
         self.converted_from = converted_from
         self.image_storage_format = str(image_storage_format or "raw").lower()
         self.jpeg_quality = int(jpeg_quality)
+        self.episode_metadata = deepcopy(dict(episode_metadata or {}))
         self.dataset_dir = self.root / dataset_relative_dir(
             self.schema,
             dataset_stage=self.dataset_stage if self.schema.name == "qpos_gripper" else None,
@@ -109,6 +112,8 @@ class JsonlDatasetWriter:
             "frame_count": self._frame_count,
             "data_path": str(self._episode.path.relative_to(self.dataset_dir)),
         }
+        metadata.update(self.episode_metadata)
+        metadata["task"] = self.task
         with (self.meta_dir / "episodes.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(metadata, ensure_ascii=False) + "\n")
         self._episode = None

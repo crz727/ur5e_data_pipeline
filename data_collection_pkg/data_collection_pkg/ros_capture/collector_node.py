@@ -4,6 +4,7 @@ import json
 from importlib import import_module
 from pathlib import Path
 
+from data_collection_pkg.dataset.task_annotations import parse_capture_task_annotation
 from data_collection_pkg.ros_capture.collector_engine import TeleopCollectorEngine
 from data_collection_pkg.ros_capture.message_adapters import (
     camera_sample,
@@ -293,6 +294,7 @@ class FixedRateQposDemoNodeAdapter:
         string_msg_type=None,
         subscription_msg_types: dict = None,
         require_message_stamps: bool = False,
+        episode_metadata: dict = None,
         qos: int = 10,
     ) -> None:
         self.node = node
@@ -327,6 +329,7 @@ class FixedRateQposDemoNodeAdapter:
             raw_command_topic=self.config["action_topic"],
             image_storage_format=self.config["image_storage_format"],
             jpeg_quality=self.config["jpeg_quality"],
+            episode_metadata=episode_metadata,
         )
         self.engine = FixedRateQposDemoEngine(
             recorder=self.recorder,
@@ -512,6 +515,12 @@ def collector_node_main(args=None):
         config = teleop_collector_config_from_parameters(node)
         root = _parameter_value(node, "root", "datasets")
         task = _parameter_value(node, "task", "teleop")
+        episode_metadata = parse_capture_task_annotation(
+            task_name=str(task),
+            task_id=config["task_id"],
+            english=config["language_instruction_en"],
+            chinese=config["language_instruction_zh"],
+        )
         try:
             from std_msgs.msg import String
         except Exception:
@@ -531,6 +540,7 @@ def collector_node_main(args=None):
                 teleop_subscription_type_names_from_parameters(node)
             ),
             require_message_stamps=teleop_requires_message_stamps_from_parameters(node),
+            **({"episode_metadata": episode_metadata} if adapter_class is FixedRateQposDemoNodeAdapter else {}),
         )
         node.get_logger().info(
             "data_collection collector adapter started "
@@ -579,6 +589,9 @@ def teleop_collector_config_from_parameters(node) -> dict:
     sample_rate_hz = float(_parameter_value(node, "sample_rate_hz", config["sample_rate_hz"]))
     image_storage_format = str(_parameter_value(node, "image_storage_format", config["image_storage_format"]))
     jpeg_quality = int(_parameter_value(node, "jpeg_quality", config["jpeg_quality"]))
+    task_id = _parameter_value(node, "task_id", "")
+    language_instruction_en = _parameter_value(node, "language_instruction_en", "")
+    language_instruction_zh = _parameter_value(node, "language_instruction_zh", "")
     action_topic = str(_parameter_value(node, "action_topic", config["action_topic"]))
     gripper_state_topic = str(_parameter_value(node, "gripper_state_topic", config["gripper_state_topic"]))
     external_camera_topic = str(_parameter_value(node, "external_camera_topic", config["external_camera_topic"]))
@@ -632,6 +645,9 @@ def teleop_collector_config_from_parameters(node) -> dict:
         "sample_rate_hz": sample_rate_hz,
         "image_storage_format": image_storage_format,
         "jpeg_quality": jpeg_quality,
+        "task_id": task_id,
+        "language_instruction_en": language_instruction_en,
+        "language_instruction_zh": language_instruction_zh,
         "action_topic": action_topic,
         "gripper_state_topic": gripper_state_topic,
         "external_camera_topic": external_camera_topic,
@@ -704,6 +720,9 @@ def _declare_parameters(node) -> None:
     declare("sample_rate_hz", 15.0)
     declare("image_storage_format", "jpeg")
     declare("jpeg_quality", 75)
+    declare("task_id", "")
+    declare("language_instruction_en", "")
+    declare("language_instruction_zh", "")
     declare("action_topic", TELEOP_TOPICS["servo_l_command"])
     declare("gripper_state_topic", TELEOP_TOPICS["gripper_state"])
     declare("external_camera_topic", TELEOP_TOPICS["external_camera"])

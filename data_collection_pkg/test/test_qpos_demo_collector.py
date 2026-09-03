@@ -54,6 +54,42 @@ def _raw_command_sample(timestamp):
     )
 
 
+def test_qpos_demo_recorder_persists_episode_annotation(tmp_path):
+    annotation = {
+        "task_name": "pick_place_batch_0807",
+        "task_id": "pick_red_block_to_blue_tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+        "annotation_source": "capture_ui",
+    }
+    recorder = QposDemoJsonlRecorder(
+        tmp_path,
+        task="pick_place_batch_0807",
+        episode_metadata=annotation,
+    )
+    engine = FixedRateQposDemoEngine(
+        recorder=recorder,
+        required_topics=(TELEOP_TOPICS["joint_states"], TELEOP_TOPICS["gripper_state"]),
+        tolerance_s=0.05,
+    )
+    engine.add_sample(_joint_sample(1.0, [0.0] * 6))
+    engine.add_sample(_gripper_sample(1.0, 0.2))
+    assert engine.capture_at(1.0) is None
+    engine.add_sample(_joint_sample(1.1, [0.1] * 6))
+    engine.add_sample(_gripper_sample(1.1, 0.3))
+    assert engine.capture_at(1.1).ok is True
+    recorder.close()
+
+    episode = json.loads((recorder.writer.meta_dir / "episodes.jsonl").read_text(encoding="utf-8"))
+
+    assert episode["task"] == "pick_place_batch_0807"
+    assert episode["task_name"] == "pick_place_batch_0807"
+    assert episode["task_id"] == "pick_red_block_to_blue_tray"
+    assert episode["language_instruction_en"] == "Pick up the red block and place it in the blue tray."
+    assert episode["language_instruction_zh"] == "抓取红色方块并放入蓝色托盘。"
+    assert episode["annotation_source"] == "capture_ui"
+
+
 def test_fixed_rate_qpos_demo_uses_next_state_as_action(tmp_path):
     recorder = QposDemoJsonlRecorder(
         tmp_path,

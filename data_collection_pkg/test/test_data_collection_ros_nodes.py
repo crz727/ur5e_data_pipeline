@@ -1,4 +1,5 @@
 import inspect
+import json
 from types import SimpleNamespace
 
 import data_collection_pkg.action_replay.ursim_rviz_adapter_node as ursim_rviz
@@ -220,6 +221,55 @@ def test_collector_config_can_override_sync_tolerance():
     assert config["sync_tolerance_s"] == 0.02
 
 
+def test_fixed_rate_node_adapter_forwards_annotation_to_episode_metadata(tmp_path):
+    annotation = {
+        "task_name": "pick_place_batch_0807",
+        "task_id": "pick_red_block_to_blue_tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+        "annotation_source": "capture_ui",
+    }
+    config = collector_node.default_teleop_collector_config()
+    config.update({
+        "sampling_mode": "fixed_rate",
+        "schema": "qpos_gripper",
+        "default_required_cameras": (),
+        "required_topics": ("/joint_states", "/gripper/state"),
+        "optional_topics": (),
+    })
+    node = _FixedRateFakeNode()
+    adapter = collector_node.FixedRateQposDemoNodeAdapter(
+        node,
+        root=tmp_path,
+        task="pick_place_batch_0807",
+        config=config,
+        episode_metadata=annotation,
+    )
+    adapter.recorder.writer.start_episode()
+    adapter.recorder.writer.add_frame({"timestamp": 1.0, "state": [0.0] * 7}, [0.0] * 7)
+    adapter.recorder.writer.close_episode()
+
+    episode = json.loads((adapter.recorder.writer.meta_dir / "episodes.jsonl").read_text(encoding="utf-8"))
+
+    assert episode["task_name"] == "pick_place_batch_0807"
+    assert episode["task_id"] == "pick_red_block_to_blue_tray"
+    assert episode["language_instruction_en"] == "Pick up the red block and place it in the blue tray."
+    assert episode["language_instruction_zh"] == "抓取红色方块并放入蓝色托盘。"
+    assert episode["annotation_source"] == "capture_ui"
+
+
+def test_collector_config_reads_capture_task_annotation_parameters():
+    config = collector_node.teleop_collector_config_from_parameters(_ParameterNode({
+        "task_id": "pick-red-block-to-blue-tray",
+        "language_instruction_en": "Pick up the red block and place it in the blue tray.",
+        "language_instruction_zh": "抓取红色方块并放入蓝色托盘。",
+    }))
+
+    assert config["task_id"] == "pick-red-block-to-blue-tray"
+    assert config["language_instruction_en"] == "Pick up the red block and place it in the blue tray."
+    assert config["language_instruction_zh"] == "抓取红色方块并放入蓝色托盘。"
+
+
 def test_strict_collector_drops_unstamped_command_without_crashing(tmp_path):
     node = _FakeNode()
     adapter = collector_node.TeleopCollectorNodeAdapter(
@@ -433,3 +483,9 @@ class _FakeNode:
 
     def get_clock(self):
         return _FakeClock()
+
+
+class _FixedRateFakeNode(_FakeNode):
+    def create_timer(self, _period, callback):
+        self.timer = callback
+        return callback
