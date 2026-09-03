@@ -4,7 +4,7 @@
   <name>data_collection_pkg</name>
   <version>0.1.0</version>
   <description>Reusable ROS2 data collection, quality validation, visualization, LeRobot export, and replay package for UR5e workflows</description>
-  <maintainer email="hjy@todo.todo">hjy</maintainer>
+  <maintainer email="1762638741@qq.com">陈润泽</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>

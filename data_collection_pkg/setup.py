@@ -17,16 +17,11 @@ setup(
             "launch/data_collection_teleop_demo_qpos.launch.py",
             "launch/data_collection_replay.launch.py",
         ]),
-        ("share/" + package_name + "/docs", [
-            "docs/data_collection_pkg_boundary.md",
-            "docs/ros2_manual_verification.md",
-            "docs/REAL_ROBOT_VALIDATION.md",
-        ]),
     ],
     install_requires=["setuptools", "flask", "numpy", "h5py", "pillow"],
     zip_safe=True,
-    maintainer="hjy",
-    maintainer_email="hjy@todo.todo",
+    maintainer="陈润泽",
+    maintainer_email="1762638741@qq.com",
     description="Reusable ROS2 data collection, validation, visualization, LeRobot export, and replay package for UR5e workflows.",
     license="Apache-2.0",
     extras_require={

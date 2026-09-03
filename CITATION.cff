@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+title: "UR5e Data Pipeline"
+message: "If this project supports your work, please cite the repository."
+type: software
+authors:
+  - family-names: "Chen"
+    given-names: "Runze"
+    email: "1762638741@qq.com"
+version: "0.1.0"
+date-released: 2026-08-26
+license: Apache-2.0
+repository-code: "https://github.com/crz727/ur5e_data_pipeline"
+abstract: "ROS 2 data collection, quality validation, LeRobot export, Qt/RViz operation, and safe replay for UR5e robot-learning datasets."

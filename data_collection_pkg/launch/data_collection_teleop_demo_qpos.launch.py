@@ -1,3 +1,10 @@
+"""Compatibility fixed-rate qpos launch.
+
+The current operator path is ``data_collection_hardware_qpos.launch.py``, which
+also exposes the scene-camera sampling clock and independent sync tolerances.
+This older entry point remains packaged for historical scripts and datasets.
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration

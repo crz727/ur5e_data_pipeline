@@ -1,4 +1,9 @@
-"""ROS2 node entry point for the read-only Web dashboard."""
+"""ROS2 node entry point for the Dashboard API backend.
+
+The browser page served by this node is retained for compatibility. The
+supported operator client is the Qt/RViz panel, which consumes the Flask
+``/api/...`` endpoints.
+"""
 
 import threading
 

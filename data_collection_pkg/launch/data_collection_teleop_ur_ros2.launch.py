@@ -1,3 +1,10 @@
+"""Compatibility launch for action-triggered ``teleop_twist_gripper`` data.
+
+New ACT/VLA demonstrations should use ``data_collection_hardware_qpos.launch.py``
+with ``sampling_clock:=scene_camera_header``. This launch remains packaged so
+older teleop event datasets and integrations can still be collected or replayed.
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
