@@ -57,6 +57,7 @@ def test_capture_manager_starts_hardware_qpos_collector_only(tmp_path):
     assert "task:=teleop_segment_01" in command
     assert "gripper_state_topic:=/binary_gripper_state" in command
     assert "gripper_state_msg_type:=std_msgs.msg:Int8" in command
+    assert "sampling_clock:=scene_camera_header" in command
     assert calls[0][1]["start_new_session"] is True
     assert not any("ur5e_http_api" in part for part in command)
     assert not any("pika_teleop" in part for part in command)
