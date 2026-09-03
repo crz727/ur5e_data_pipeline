@@ -123,6 +123,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr wrist_camera_subscription_;
 
   QNetworkAccessManager * network_{nullptr};
+  QString dashboard_url_;
   QTimer * state_timer_{nullptr};
   QTimer * control_services_timeout_timer_{nullptr};
   QTimer * mode_status_stale_timer_{nullptr};

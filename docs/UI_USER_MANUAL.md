@@ -64,6 +64,15 @@ ros2 launch data_collection_rviz_panel data_collection_rviz_panel.launch.py
 
 该 launch 启动 Dashboard、只读 live/replay 模型和 Qt 面板，不替代真机驱动或模式管理器。若由其他 launch 统一启动这些服务，应确认没有重复启动同名节点。
 
+面板默认访问 `http://127.0.0.1:8765/api/state`。如果 Dashboard 在其他主机或端口运行，启动面板时显式传入地址：
+
+```bash
+ros2 launch data_collection_rviz_panel data_collection_rviz_panel.launch.py \
+  dashboard_url:=http://<dashboard-host>:<dashboard-port>
+```
+
+`dashboard_host` 和 `dashboard_port` 只控制本次 launch 启动的 Dashboard 监听地址；`dashboard_url` 控制 Qt 面板实际请求地址。两者不一致时，面板会显示 `dashboard backend disconnected`，右上角 Robot、Scene、Wrist、Writer 会保持 `waiting`，这表示状态接口不可达，不代表硬件一定未连接。
+
 ### 3.3 只读硬件检查
 
 开始采集前，建议确认关键话题已经发布：
@@ -83,6 +92,16 @@ ros2 topic hz /camera1/wrist_camera/color/image_raw/compressed
 
 - `dashboard backend connected`：最近一次 `/api/state` 请求成功。
 - `dashboard backend disconnected`：请求失败或超时。采集、清洗、转换和回放控制请求不能可靠执行。
+
+出现 disconnected 或四个 chip 长时间为 `waiting` 时，先检查：
+
+```bash
+curl -fsS http://127.0.0.1:8765/api/state
+ss -ltnp | rg ':8765'
+ros2 node list | rg 'data_collection_web_dashboard|data_collection_topology_monitor'
+```
+
+如果 Dashboard 在其他主机，使用实际地址执行 `dashboard_url:=...`；如果本机没有 8765 监听，先启动 `data_collection_monitor.launch.py` 或包含它的面板 launch。
 
 面板约每 500 ms 轮询一次状态，但同一时刻只允许一个 `/api/state` 请求在途；单次请求约 1.5 s 超时，避免网络阻塞造成请求堆积。
 

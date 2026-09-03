@@ -22,6 +22,7 @@ def generate_launch_description():
 
     dashboard_host = LaunchConfiguration("dashboard_host")
     dashboard_port = LaunchConfiguration("dashboard_port")
+    dashboard_url = LaunchConfiguration("dashboard_url")
     capture_root = LaunchConfiguration("capture_root")
     start_live_state_publisher = LaunchConfiguration("start_live_state_publisher")
     start_replay_state_publisher = LaunchConfiguration("start_replay_state_publisher")
@@ -36,6 +37,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("dashboard_host", default_value="127.0.0.1"),
         DeclareLaunchArgument("dashboard_port", default_value="8765"),
+        DeclareLaunchArgument("dashboard_url", default_value="http://127.0.0.1:8765"),
         DeclareLaunchArgument(
             "capture_root", default_value="~/ur5e_ws/datasets/ui_capture"
         ),
@@ -94,6 +96,7 @@ def generate_launch_description():
             package="data_collection_rviz_panel",
             executable="data_collection_rviz_panel",
             output="screen",
+            parameters=[{"dashboard_url": dashboard_url}],
             on_exit=Shutdown(reason="Qt data collection panel exited"),
         ),
     ])

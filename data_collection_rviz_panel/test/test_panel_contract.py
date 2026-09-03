@@ -441,6 +441,22 @@ def test_dashboard_state_polling_is_single_flight_and_network_requests_have_time
     assert "configure_network_request(request, 5000);" in main_window
 
 
+def test_dashboard_url_is_a_panel_parameter_forwarded_by_launch_file():
+    header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
+        encoding="utf-8"
+    )
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+    launch_file = (PANEL_ROOT / "launch" / "data_collection_rviz_panel.launch.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "dashboard_url_" in header
+    assert 'declare_parameter<std::string>("dashboard_url", "http://127.0.0.1:8765")' in main_window
+    assert "dashboard_url_" in main_window
+    assert 'DeclareLaunchArgument("dashboard_url", default_value="http://127.0.0.1:8765")' in launch_file
+    assert '"dashboard_url": dashboard_url' in launch_file
+
+
 def test_mode_status_stale_does_not_leave_switch_buttons_disabled():
     header = (PANEL_ROOT / "include" / "data_collection_rviz_panel" / "main_window.hpp").read_text(
         encoding="utf-8"

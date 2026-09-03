@@ -76,7 +76,6 @@ namespace data_collection_rviz_panel
 {
 namespace
 {
-constexpr char kDashboardUrl[] = "http://127.0.0.1:8765";
 constexpr char kExternalCameraTopic[] = "/camera2/scene_camera/color/image_raw/compressed";
 constexpr char kWristCameraTopic[] = "/camera1/wrist_camera/color/image_raw/compressed";
 constexpr char kJointStateTopic[] = "/joint_states";
@@ -1124,6 +1123,14 @@ void MainWindow::build_ui()
 void MainWindow::initialize_ros()
 {
   node_ = std::make_shared<rclcpp::Node>("data_collection_rviz_panel");
+  node_->declare_parameter<std::string>("dashboard_url", "http://127.0.0.1:8765");
+  dashboard_url_ = QString::fromStdString(node_->get_parameter("dashboard_url").as_string());
+  while (dashboard_url_.endsWith(QLatin1Char('/'))) {
+    dashboard_url_.chop(1);
+  }
+  if (dashboard_url_.isEmpty()) {
+    dashboard_url_ = QStringLiteral("http://127.0.0.1:8765");
+  }
   mode_request_publisher_ = node_->create_publisher<std_msgs::msg::String>(kModeRequestTopic, 10);
   robot_model_joint_state_publisher_ = node_->create_publisher<sensor_msgs::msg::JointState>(
     kRobotModelJointStateTopic, 30);
@@ -1285,7 +1292,7 @@ void MainWindow::request_dashboard_state()
     return;
   }
   dashboard_state_request_in_flight_ = true;
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/state")));
+  QNetworkRequest request(QUrl(dashboard_url_ + QStringLiteral("/api/state")));
   configure_network_request(request, 1500);
   const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1306,7 +1313,7 @@ void MainWindow::request_dashboard_state()
 
 void MainWindow::post_json(const QString & path, const QJsonObject & payload)
 {
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + path));
+  QNetworkRequest request(QUrl(dashboard_url_ + path));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   configure_network_request(request, 5000);
   const auto reply = network_->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
@@ -1428,7 +1435,7 @@ void MainWindow::request_capture_stop_and_annotation()
   }
   capture_stop_in_progress_ = true;
   update_capture_toggle();
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/stop")));
+  QNetworkRequest request(QUrl(dashboard_url_ + QStringLiteral("/api/capture/stop")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   configure_network_request(request, 10000);
   const auto reply = network_->post(request, QByteArrayLiteral("{}"));
@@ -1496,7 +1503,7 @@ void MainWindow::request_capture_annotation(const QString & outcome)
   capture_annotation_in_progress_ = true;
   update_capture_toggle();
   capture_status_value_->setText(QStringLiteral("Saving capture outcome..."));
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/annotate")));
+  QNetworkRequest request(QUrl(dashboard_url_ + QStringLiteral("/api/capture/annotate")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   configure_network_request(request, 10000);
   const QJsonObject annotation_payload{{QStringLiteral("outcome"), outcome}};
@@ -1533,7 +1540,7 @@ void MainWindow::request_language_instruction_editor()
   language_editor_request_in_progress_ = true;
   update_capture_toggle();
   QNetworkRequest request(QUrl(
-    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/task-labels")));
+    dashboard_url_ + QStringLiteral("/api/capture/task-labels")));
   configure_network_request(request, 5000);
   const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1687,7 +1694,7 @@ void MainWindow::request_dataset_cleaning()
   cleaning_in_progress_ = true;
   update_capture_toggle();
   capture_status_value_->setText(QStringLiteral("Cleaning original dataset..."));
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/clean")));
+  QNetworkRequest request(QUrl(dashboard_url_ + QStringLiteral("/api/capture/clean")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   const QJsonObject payload{
     {QStringLiteral("dataset_dir"), capture_dataset_path_},
@@ -1874,7 +1881,7 @@ void MainWindow::request_lerobot_export_preflight(
 {
   capture_status_value_->setText(QStringLiteral("VLA export preflight..."));
   QNetworkRequest request(QUrl(
-    QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/capture/export-lerobot/preflight")));
+    dashboard_url_ + QStringLiteral("/api/capture/export-lerobot/preflight")));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   const QJsonObject payload{
     {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
@@ -1943,7 +1950,7 @@ void MainWindow::start_lerobot_export(
   capture_status_value_->setText(QStringLiteral("%1 export queued...").arg(profile_label));
   const QString endpoint = profile == QStringLiteral("hdf5") ?
     QStringLiteral("/api/capture/export") : QStringLiteral("/api/capture/export-lerobot");
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + endpoint));
+  QNetworkRequest request(QUrl(dashboard_url_ + endpoint));
   request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
   QJsonObject payload{
     {QStringLiteral("cleaned_dataset_dir"), cleaned_dataset_dir},
@@ -1989,7 +1996,7 @@ void MainWindow::request_lerobot_export_status()
   const QString profile_label = lerobot_export_profile_.toUpper();
   const QString endpoint = lerobot_export_profile_ == QStringLiteral("hdf5") ?
     QStringLiteral("/api/capture/export/status") : QStringLiteral("/api/capture/export-lerobot/status");
-  QNetworkRequest request(QUrl(QString::fromLatin1(kDashboardUrl) + endpoint));
+  QNetworkRequest request(QUrl(dashboard_url_ + endpoint));
   configure_network_request(request, 3000);
   const auto reply = network_->get(request);
   connect(reply, &QNetworkReply::finished, this, [this, profile_label, reply]() {
@@ -2088,7 +2095,7 @@ void MainWindow::request_replay_episodes()
     return;
   }
   replay_status_value_->setText(QStringLiteral("Loading episodes..."));
-  QUrl url(QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/replay/episodes"));
+  QUrl url(dashboard_url_ + QStringLiteral("/api/replay/episodes"));
   QUrlQuery query;
   query.addQueryItem(QStringLiteral("dataset_dir"), dataset_dir);
   url.setQuery(query);
@@ -2375,7 +2382,7 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
     if (!camera.value(QStringLiteral("valid")).toBool() || timestamp <= last_timestamp) { return; }
     last_timestamp = timestamp;
     QNetworkRequest request(QUrl(
-      QString::fromLatin1(kDashboardUrl) + QStringLiteral("/api/camera/") + name));
+      dashboard_url_ + QStringLiteral("/api/camera/") + name));
     configure_network_request(request, 3000);
     const auto reply = network_->get(request);
     connect(reply, &QNetworkReply::finished, this, [reply, label]() {
