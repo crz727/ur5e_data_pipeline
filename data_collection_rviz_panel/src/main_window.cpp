@@ -759,6 +759,8 @@ void MainWindow::build_ui()
   language_instruction_button_->setToolTip(QStringLiteral("Language Instruction"));
   capture_toggle_button_ = new QPushButton(QStringLiteral("Start Capture"), capture_box);
   clean_dataset_button_ = new QPushButton(QStringLiteral("Clean Data"), capture_box);
+  continue_dataset_button_ = new QPushButton(QStringLiteral("Continue Dataset..."), capture_box);
+  convert_lerobot_button_ = new QPushButton(QStringLiteral("Convert LeRobot..."), capture_box);
   capture_status_value_ = make_value_label(QStringLiteral("Idle"));
   lerobot_export_progress_ = new QProgressBar(capture_box);
   lerobot_export_progress_->setTextVisible(false);
@@ -771,10 +773,12 @@ void MainWindow::build_ui()
   capture_layout->addWidget(new_task, 2, 0);
   capture_layout->addWidget(capture_toggle_button_, 2, 1);
   capture_layout->addWidget(clean_dataset_button_, 2, 2);
-  capture_layout->addWidget(new QLabel(QStringLiteral("Write status")), 3, 0);
-  capture_layout->addWidget(capture_status_value_, 3, 1, 1, 2);
-  capture_layout->addWidget(lerobot_export_progress_, 4, 0, 1, 3);
-  capture_layout->addWidget(dataset_path_value_, 5, 0, 1, 3);
+  capture_layout->addWidget(continue_dataset_button_, 3, 0, 1, 2);
+  capture_layout->addWidget(convert_lerobot_button_, 3, 2);
+  capture_layout->addWidget(new QLabel(QStringLiteral("Write status")), 4, 0);
+  capture_layout->addWidget(capture_status_value_, 4, 1, 1, 2);
+  capture_layout->addWidget(lerobot_export_progress_, 5, 0, 1, 3);
+  capture_layout->addWidget(dataset_path_value_, 6, 0, 1, 3);
   connect(new_task, &QPushButton::clicked, this, [this]() {
     post_json(QStringLiteral("/api/capture/new-task"), {{QStringLiteral("task"), capture_task_->text()}});
   });
@@ -824,6 +828,9 @@ void MainWindow::build_ui()
       request_dataset_cleaning();
     }
   });
+  connect(continue_dataset_button_, &QPushButton::clicked, this, &MainWindow::request_existing_dataset);
+  connect(convert_lerobot_button_, &QPushButton::clicked, this,
+    &MainWindow::request_standalone_lerobot_export);
   operation_layout->addWidget(capture_box);
 
   auto * replay_box = new QGroupBox(QStringLiteral("Episode Replay (read-only)"), operation_column);
@@ -1788,6 +1795,27 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
   }
   dataset_path_value_->setText(QStringLiteral("Dataset Path %1").arg(
     capture_dataset_path_.isEmpty() ? QStringLiteral("-") : capture_dataset_path_));
+  const bool selected_existing = capture.value(QStringLiteral("selected_existing_dataset")).toBool(false);
+  capture_mode_->setEnabled(!selected_existing && !capture_running_);
+  if (selected_existing && !capture_running_) {
+    const QString selected_mode = capture.value(QStringLiteral("runtime_mode")).toString();
+    const int mode_index = capture_mode_->findText(selected_mode, Qt::MatchFixedString);
+    if (mode_index >= 0) {
+      capture_mode_->setCurrentIndex(mode_index);
+    }
+    const QString selected_task = capture.value(QStringLiteral("task")).toString();
+    if (!selected_task.isEmpty()) {
+      capture_task_->setText(selected_task);
+    }
+    const QJsonObject annotation = capture.value(QStringLiteral("task_annotation")).toObject();
+    capture_task_id_ = annotation.value(QStringLiteral("task_id")).toString();
+    capture_language_instruction_en_ = annotation.value(QStringLiteral("language_instruction_en")).toString();
+    capture_language_instruction_zh_ = annotation.value(QStringLiteral("language_instruction_zh")).toString();
+    language_instruction_button_->setText(
+      capture_task_id_.isEmpty() && capture_language_instruction_en_.isEmpty() &&
+      capture_language_instruction_zh_.isEmpty() ?
+      QStringLiteral("Language: not set") : QStringLiteral("Language: ready"));
+  }
   update_capture_toggle();
   if (replay_dataset_path_->text().isEmpty() && !capture_dataset_path_.isEmpty()) {
     replay_dataset_path_->setText(capture_dataset_path_);
@@ -1964,6 +1992,56 @@ void MainWindow::update_dashboard_state(const QJsonObject & state)
     load_replay_camera(QStringLiteral("external"), external_camera_label_, external_replay_camera_timestamp_);
     load_replay_camera(QStringLiteral("wrist"), wrist_camera_label_, wrist_replay_camera_timestamp_);
   }
+}
+
+void MainWindow::request_existing_dataset()
+{
+  if (capture_running_) {
+    return;
+  }
+  auto * dialog = new QFileDialog(this, QStringLiteral("Select original qpos_gripper dataset"));
+  dialog->setFileMode(QFileDialog::Directory);
+  dialog->setOption(QFileDialog::ShowDirsOnly, true);
+  dialog->setOption(QFileDialog::DontUseNativeDialog, true);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &QFileDialog::fileSelected, this, [this](const QString & dataset_dir) {
+    post_json(QStringLiteral("/api/capture/select-existing-dataset"),
+      {{QStringLiteral("dataset_dir"), dataset_dir}});
+  });
+  dialog->open();
+}
+
+void MainWindow::request_standalone_lerobot_export()
+{
+  if (capture_running_ || lerobot_export_in_progress_) {
+    return;
+  }
+  auto * dialog = new QFileDialog(this, QStringLiteral("Select cleaned qpos_gripper dataset"));
+  dialog->setFileMode(QFileDialog::Directory);
+  dialog->setOption(QFileDialog::ShowDirsOnly, true);
+  dialog->setOption(QFileDialog::DontUseNativeDialog, true);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &QFileDialog::fileSelected, this, [this](const QString & dataset_dir) {
+    QDir parent(dataset_dir);
+    parent.cdUp();
+    QDir stage(parent);
+    stage.cdUp();
+    if (QFileInfo(dataset_dir).fileName() != QStringLiteral("qpos_gripper") ||
+      stage.dirName() != QStringLiteral("cleaned") ||
+      !QFileInfo(QDir(dataset_dir).filePath(QStringLiteral("meta/episodes.jsonl"))).isFile())
+    {
+      show_temporary_capture_status(QStringLiteral("Select cleaned/<mode>/qpos_gripper with episode metadata"));
+      return;
+    }
+    bool accepted = false;
+    const QString profile = QInputDialog::getItem(
+      this, QStringLiteral("LeRobot Profile"), QStringLiteral("Profile"),
+      {QStringLiteral("ACT"), QStringLiteral("VLA")}, 0, false, &accepted);
+    if (accepted) {
+      request_lerobot_export(dataset_dir, profile.toLower());
+    }
+  });
+  dialog->open();
 }
 
 void MainWindow::start_control_services()

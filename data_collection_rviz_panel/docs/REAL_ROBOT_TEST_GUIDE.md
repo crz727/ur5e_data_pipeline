@@ -168,6 +168,15 @@ rviz2 -d /home/crz/src/my_description/rviz/my_robot.rviz
 8. 点击 `Stop Capture`。
 9. 确认状态回到 `Idle` 或显示带返回码的停止状态。
 
+要在已有任务中继续采集，点击 `Continue Dataset...` 并选择精确的
+`original/<mode>/qpos_gripper` 目录。面板会恢复其模式、任务和最新语言标注，
+并从下一 episode index 追加；不能在该选择状态下改成另一个采集模式。追加后应
+重新执行清洗，现有 `cleaned/`、LeRobot 输出不会自动包含新 episode。
+
+`Convert LeRobot...` 独立于当前采集任务。选择精确的
+`cleaned/<mode>/qpos_gripper` 目录后选择 ACT 或 VLA，再选择一个不存在的输出
+目录。VLA 会先显示语言 preflight；原始目录不能直接转换。
+
 采集器使用压缩图像格式写入数据，默认参数为 JPEG、质量 75。不要在第一次真机验证时修改采样率、同步阈值或相机话题。
 
 ## 7. 数据文件检查

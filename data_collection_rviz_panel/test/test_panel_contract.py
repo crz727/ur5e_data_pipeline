@@ -315,3 +315,16 @@ def test_panel_control_services_manage_only_owned_api_and_mode_manager():
         'QStringLiteral("run_autonomous.py")',
     ):
         assert forbidden_command not in lifecycle_source
+
+
+def test_panel_can_resume_original_data_and_convert_selected_cleaned_data():
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(encoding="utf-8")
+
+    assert 'QStringLiteral("Continue Dataset...")' in main_window
+    assert 'QStringLiteral("/api/capture/select-existing-dataset")' in main_window
+    assert "void MainWindow::request_existing_dataset()" in main_window
+    assert 'QStringLiteral("Convert LeRobot...")' in main_window
+    assert "void MainWindow::request_standalone_lerobot_export()" in main_window
+    assert 'QStringLiteral("LeRobot Profile")' in main_window
+    assert 'QStringLiteral("cleaned")' in main_window
+    assert "request_lerobot_export(dataset_dir, profile.toLower())" in main_window
