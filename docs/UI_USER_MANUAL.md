@@ -29,7 +29,7 @@
 | 3 | Robot State (RViz2) | 显示只读机器人模型和 TF |
 | 4 | Camera Views | 显示场景相机和腕部相机 |
 | 5 | Realtime Telemetry | 绘制关节位置、速度、力矩曲线 |
-| 6 | Mode Manager | 启停控制服务并请求 AUTO/API/TELEOP/Hil_teleop/idle |
+| 6 | Mode Manager | 启停控制服务并请求 ACT/VLA/API/TELEOP/HIL TELEOP/idle |
 | 7 | Capture | 新建或继续数据集，采集、标注、清洗和导出 |
 | 8 | Episode Replay | 加载数据集并只读回放指定 episode |
 | 9 | 诊断 Tabs | 查看话题、拓扑、质量、丢帧原因和回放状态 |
@@ -176,7 +176,7 @@ Frame 当前帧 / 总帧数 · t = 相对起始时间（秒）
 
 | 字段 | 含义 |
 | --- | --- |
-| `Current mode` | 当前控制模式，例如 `auto`、`api`、`teleop`、`hil_teleop`、`idle` |
+| `Current mode` | 当前控制模式，例如 `act`、`smolvla`、`http_control`、`teleop`、`hil_teleop`、`idle` |
 | `State` | 模式管理器状态，例如 waiting、switching、running、fault |
 | `Owner` | 当前控制权持有者 |
 | `Step` | 切换流程当前步骤 |
@@ -189,17 +189,18 @@ Frame 当前帧 / 总帧数 · t = 相对起始时间（秒）
 
 - **Start**：启动面板可管理的 HTTP API 和模式管理器进程。若检测到已有外部服务，面板不会重复启动，并提示 `externally managed`。
 - **Stop**：停止面板拥有的控制服务。停止过程按 SIGINT、SIGTERM、SIGKILL 的渐进策略等待进程退出；外部拥有的进程不应由面板强制杀死。
-- **AUTO**：请求 `auto` 控制模式。
-- **API**：请求 `api` 控制模式，供外部 HTTP/API 控制器使用。
+- **ACT**：请求 `act` 控制模式。
+- **VLA**：请求 `smolvla` 控制模式，对应 external mode manager 的 SmolVLA 控制源。
+- **API**：请求 `http_control` 控制模式，供外部 HTTP/API 控制器使用。
 - **TELEOP**：请求 `teleop` 控制模式，通常用于人工遥操作。
-- **Hil_teleop**：请求 `hil_teleop` 控制模式；是否复位机械臂由外部 `pika_teleop` 参数决定。
+- **HIL TELEOP**：请求 `hil_teleop` 控制模式；是否复位机械臂由外部 `pika_teleop` 参数决定。
 - **Pause**：请求 `idle`，用于暂停控制。按钮文字保持英文 `Pause`，不是暂停采集。
 
 模式切换期间（`switching`）模式按钮会暂时禁用，防止并发请求。约 1.5 s 未收到模式状态时，面板会把状态视为不可用并重新允许必要操作。
 
 ### 9.3 HIL 使用建议
 
-HIL 场景下，先在外部控制器准备完成后点击 `AUTO`，需要人工接管时点击 `Pause` 进入 `idle`，确认机械臂停止后再点击 `Hil_teleop`。回到自动控制前，应先确认遥操作节点已释放控制权，再请求 `AUTO`。任何切换都必须由现场人员保持急停可用并观察机器人。
+HIL 场景下，先在外部 ACT/VLA 控制器准备完成后点击 `ACT` 或 `VLA`，需要人工接管时点击 `Pause` 进入 `idle`，确认机械臂停止后再点击 `HIL TELEOP`。回到自动控制前，应先确认遥操作节点已释放控制权，再请求 `ACT` 或 `VLA`。任何切换都必须由现场人员保持急停可用并观察机器人。
 
 ## 10. Capture 数据采集
 

@@ -159,6 +159,9 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert 'QStringLiteral("Replay Timeline")' in main_window
     assert "replay_timeline_box" in main_window
     assert "replay_timeline_box->setFixedHeight(72);" in main_window
+    assert "replay_progress_value_->setWordWrap(false);" in main_window
+    assert "replay_progress_value_->setMinimumWidth(230);" in main_window
+    assert "replay_timeline_->setMinimumHeight(28);" in main_window
     assert "root_layout->setSpacing(10);" in main_window
     assert "root_layout->addWidget(replay_timeline_box);" in main_window
     assert "auto * mode_status_layout = new QFormLayout(mode_status_frame);" in main_window
@@ -201,6 +204,50 @@ def test_panel_package_declares_rviz_qt_executable_and_live_topic_defaults():
     assert 'QColor("#131419")' in main_window
     assert 'QColor("#f3eee2")' in main_window
     assert 'QColor("#c8a44f")' in main_window
+
+
+def test_panel_header_branding_dashboard_chip_and_telemetry_colors_are_explicit():
+    cmake_lists = (PANEL_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    main_window = (PANEL_ROOT / "src" / "main_window.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert "assets/chuangzhou_best_logo.png" in cmake_lists
+    assert 'QStringLiteral("Robotics Data Workbench")' in main_window
+    assert 'QStringLiteral("Data Collection Console")' not in main_window
+    assert 'QStringLiteral("UR5e Data Collection Console")' not in main_window
+    assert 'QStringLiteral("Dashboard Backend: %1")' in main_window
+    assert "set_dashboard_health_chip" in main_window
+    assert 'QStringLiteral("#74c79b")' in main_window
+    assert 'QStringLiteral("#e15b66")' in main_window
+    assert 'QStringLiteral("#e4c778")' in main_window
+    assert 'QPixmap logo_pixmap(QStringLiteral(":/data_collection_rviz_panel/chuangzhou_best_logo.png"))' in main_window
+    assert "auto * top_bar = new QHBoxLayout;" in main_window
+    assert "auto * brand_block = new QHBoxLayout;" in main_window
+    assert "auto * status_row = new QHBoxLayout;" in main_window
+    assert "root_layout->addLayout(top_bar);" in main_window
+    assert "logo->setFixedSize(150, 46);" in main_window
+    assert "font-size:25px" in main_window
+    assert "replay_timeline_->setMaximumWidth" not in main_window
+    assert "replay_timeline_box->setFixedWidth" not in main_window
+    assert "root_layout->addWidget(replay_timeline_box);" in main_window
+    assert "replay_timeline_section" not in main_window
+    assert "std::sort(entries.begin(), entries.end()" in main_window
+    assert "candidate_y = plot.bottom() + 10" in main_window
+    assert "above_y = plot.top() - info_height - 10" in main_window
+    assert "const int plot_midpoint_x = plot.center().x();" in main_window
+    assert "hover_position_.x() < plot_midpoint_x" in main_window
+    assert "const int right_side_x" in main_window
+    assert "const int left_side_x" in main_window
+    hover_x_start = main_window.index("const int hover_x = place_right ?")
+    hover_x_block = main_window[hover_x_start:main_window.index(";", hover_x_start) + 1]
+    assert "std::clamp(right_side_x, minimum_info_x, maximum_info_x)" in hover_x_block
+    assert "std::clamp(left_side_x, minimum_info_x, maximum_info_x)" in hover_x_block
+    assert hover_x_block.index("right_side_x") < hover_x_block.index("left_side_x")
+    assert "opposite_info_x" not in main_window
+    assert "const QRect right_rect(hover_x, right_y, info_width, info_height);" in main_window
+    for color in ("#4ea5ff", "#ff9f43", "#32d6c7", "#c58cff", "#ff5d73", "#f4d35e"):
+        assert f'QColor("{color}")' in main_window
 
 
 def test_panel_launch_wires_safe_replay_tf_without_hardware_control():
@@ -369,15 +416,24 @@ def test_panel_control_services_manage_only_owned_api_and_mode_manager():
     assert "request_process_stop(control_mode_manager_pid_);" in main_window
     assert "Forcing Mode Manager shutdown" in main_window
 
+    assert "QPushButton * act_button_" in header
+    assert "QPushButton * vla_button_" in header
     assert "QPushButton * hil_button_" in header
-    assert 'QStringLiteral("Hil_teleop")' in main_window
+    assert 'QStringLiteral("HIL TELEOP")' in main_window
+    assert 'QStringLiteral("AUTO")' not in main_window
+    assert "auto_button_" not in header
+    assert "auto_button_" not in main_window
+    assert '{act_button_, QStringLiteral("act")}' in main_window
+    assert '{vla_button_, QStringLiteral("smolvla")}' in main_window
+    assert '{api_button_, QStringLiteral("http_control")}' in main_window
     assert '{hil_button_, QStringLiteral("hil_teleop")}' in main_window
     assert 'QStringLiteral("Start")' in main_window
     assert 'QStringLiteral("Stop")' in main_window
     assert "mode_buttons_layout->addWidget(control_services_button_, 0, 0);" in main_window
     assert "mode_buttons_layout->addWidget(stop_control_services_button_, 0, 1);" in main_window
-    assert "mode_buttons_layout->addWidget(idle_button_, 3, 0, 1, 2);" in main_window
+    assert "mode_buttons_layout->addWidget(idle_button_, 3, 1);" in main_window
     assert "mode_buttons_layout->addWidget(mode_buttons[index].first, index / 2 + 1, index % 2);" in main_window
+    assert "idle_button_->setMinimumHeight(36);" in main_window
     assert "stop_control_services_button_->setEnabled(true);" in main_window
     assert "bool recover_residual_control_services();" in header
     assert "ResidualControlServices find_residual_control_services()" in main_window

@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/data_collection_rviz_panel">
+    <file alias="chuangzhou_best_logo.png">../assets/chuangzhou_best_logo.png</file>
+  </qresource>
+</RCC>

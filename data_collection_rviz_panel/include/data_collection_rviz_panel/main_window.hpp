@@ -17,6 +17,7 @@
 
 class QComboBox;
 class QDoubleSpinBox;
+class QFrame;
 class QGroupBox;
 class QLabel;
 class QLineEdit;
@@ -130,6 +131,7 @@ private:
   qint64 control_api_pid_{0};
   qint64 control_mode_manager_pid_{0};
   QLabel * connection_label_{nullptr};
+  QFrame * dashboard_health_frame_{nullptr};
   QLabel * robot_health_value_{nullptr};
   QLabel * scene_camera_health_value_{nullptr};
   QLabel * wrist_camera_health_value_{nullptr};
@@ -151,7 +153,8 @@ private:
   QPushButton * convert_lerobot_button_{nullptr};
   QPushButton * language_instruction_button_{nullptr};
   QPushButton * idle_button_{nullptr};
-  QPushButton * auto_button_{nullptr};
+  QPushButton * act_button_{nullptr};
+  QPushButton * vla_button_{nullptr};
   QPushButton * api_button_{nullptr};
   QPushButton * teleop_button_{nullptr};
   QPushButton * hil_button_{nullptr};

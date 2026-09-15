@@ -16,9 +16,12 @@ find_package(rviz_rendering REQUIRED)
 find_package(rviz_default_plugins REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets Network)
 
+qt5_add_resources(PANEL_RESOURCES resources/data_collection_rviz_panel.qrc)
+
 add_executable(data_collection_rviz_panel
   src/main.cpp
   src/main_window.cpp
+  ${PANEL_RESOURCES}
 )
 target_include_directories(data_collection_rviz_panel PRIVATE include)
 target_link_libraries(data_collection_rviz_panel Qt5::Widgets Qt5::Network)
@@ -29,6 +32,7 @@ ament_target_dependencies(data_collection_rviz_panel
 
 install(TARGETS data_collection_rviz_panel DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+install(FILES assets/chuangzhou_best_logo.png DESTINATION share/${PROJECT_NAME}/assets)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)

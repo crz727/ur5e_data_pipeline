@@ -44,6 +44,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QKeySequence>
@@ -465,8 +466,8 @@ private:
   const QVector<QColor> & curve_colors() const
   {
     static const QVector<QColor> colors = {
-      QColor("#c8a44f"), QColor("#d45264"), QColor("#f3eee2"),
-      QColor("#9c5f68"), QColor("#e4c778"), QColor("#7d5560")};
+      QColor("#4ea5ff"), QColor("#ff9f43"), QColor("#32d6c7"),
+      QColor("#c58cff"), QColor("#ff5d73"), QColor("#f4d35e")};
     return colors;
   }
 
@@ -600,21 +601,60 @@ private:
     const Sample & sample = samples_[hovered_sample_index_];
     const int info_height = 24 + joint_count * 15;
     const int info_width = std::min(std::max(220, width() / 2), std::max(220, width() - 12));
-    const int info_x = std::max(6, width() - info_width - 6);
-    const int info_y = std::clamp(plot.bottom() - info_height, 2, std::max(2, height() - info_height - 2));
-    const QRect info_rect(info_x, info_y, info_width, info_height);
+    const int plot_midpoint_x = plot.center().x();
+    const bool place_right = hover_position_.x() < plot_midpoint_x;
+    const int right_side_x = hover_position_.x() + 14;
+    const int left_side_x = hover_position_.x() - info_width - 14;
+    const int minimum_info_x = 6;
+    const int maximum_info_x = std::max(minimum_info_x, width() - info_width - 6);
+    // Keep the overlay on the side opposite the cursor. At the edges, clamp it
+    // into the chart bounds instead of flipping it back over the cursor.
+    const int hover_x = place_right ?
+      std::clamp(right_side_x, minimum_info_x, maximum_info_x) :
+      std::clamp(left_side_x, minimum_info_x, maximum_info_x);
+    const int candidate_y = plot.bottom() + 10;
+    const int above_y = plot.top() - info_height - 10;
+    const int right_y = std::clamp(hover_position_.y() - info_height / 2, 2,
+      std::max(2, height() - info_height - 2));
+    const QRect below_rect(hover_x, candidate_y, info_width, info_height);
+    const QRect above_rect(hover_x, above_y, info_width, info_height);
+    const QRect right_rect(hover_x, right_y, info_width, info_height);
+    QRect info_rect;
+    if (below_rect.bottom() <= height() - 2) {
+      info_rect = below_rect;
+    } else if (above_rect.top() >= 2) {
+      info_rect = above_rect;
+    } else {
+      info_rect = right_rect;
+    }
+    info_rect.moveLeft(std::clamp(info_rect.left(), 6, std::max(6, width() - info_width - 6)));
+    info_rect.moveTop(std::clamp(info_rect.top(), 2, std::max(2, height() - info_height - 2)));
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor("#1a1b21"));
     painter.drawRoundedRect(info_rect, 4, 4);
     painter.setPen(QColor("#f3eee2"));
     painter.drawText(info_rect.adjusted(6, 3, -6, -3), Qt::AlignTop | Qt::AlignLeft,
       QStringLiteral("t = %1 s").arg(sample.timestamp - samples_.front().timestamp, 0, 'f', 3));
-    const QFontMetrics metrics(painter.font());
+    struct HoverEntry
+    {
+      int joint;
+      double value;
+    };
+    QVector<HoverEntry> entries;
+    entries.reserve(joint_count);
     for (int joint = 0; joint < joint_count; ++joint) {
+      entries.push_back({joint, joint < sample.values.size() ? sample.values[joint] : 0.0});
+    }
+    std::sort(entries.begin(), entries.end(), [](const HoverEntry & left, const HoverEntry & right) {
+      return left.value < right.value;
+    });
+    const QFontMetrics metrics(painter.font());
+    for (int row_index = 0; row_index < entries.size(); ++row_index) {
+      const int joint = entries[row_index].joint;
+      const double value = entries[row_index].value;
       const QString name = joint < joint_names_.size() ? joint_names_[joint] :
         QStringLiteral("joint_%1").arg(joint + 1);
-      const double value = joint < sample.values.size() ? sample.values[joint] : 0.0;
-      const QRect row(info_rect.left() + 6, info_rect.top() + 20 + joint * 15,
+      const QRect row(info_rect.left() + 6, info_rect.top() + 20 + row_index * 15,
         info_rect.width() - 12, 15);
       painter.setPen(colors[joint]);
       painter.drawLine(row.left(), row.center().y(), row.left() + 8, row.center().y());
@@ -670,6 +710,20 @@ void set_health_chip(
       .arg(color, background));
 }
 
+void set_dashboard_health_chip(
+  QFrame * frame, QLabel * label, bool connected, bool waiting, const QString & detail)
+{
+  const QString color = connected ? QStringLiteral("#74c79b") :
+    (waiting ? QStringLiteral("#e4c778") : QStringLiteral("#e15b66"));
+  const QString background = connected ? QStringLiteral("#132219") :
+    (waiting ? QStringLiteral("#2a2417") : QStringLiteral("#2a151b"));
+  label->setText(QStringLiteral("Dashboard Backend: %1").arg(detail));
+  label->setStyleSheet(QStringLiteral("color:%1; background:transparent;").arg(color));
+  frame->setStyleSheet(QStringLiteral(
+    "QFrame#dashboard_status_chip { border:1px solid %1; border-radius:8px; "
+    "padding:3px 7px; background:%2; }").arg(color, background));
+}
+
 QPlainTextEdit * make_text_panel()
 {
   auto * panel = new QPlainTextEdit;
@@ -709,7 +763,7 @@ QString suggest_task_id(const QString & english_instruction)
 MainWindow::MainWindow(QWidget * parent)
 : QMainWindow(parent)
 {
-  setWindowTitle(QStringLiteral("UR5e Data Collection Console"));
+  setWindowTitle(QStringLiteral("Robotics Data Workbench"));
   resize(1500, 920);
   setMinimumSize(1200, 760);
   build_ui();
@@ -779,13 +833,40 @@ void MainWindow::build_ui()
   root_layout->setContentsMargins(10, 10, 10, 10);
   root_layout->setSpacing(10);
 
-  auto * header = new QHBoxLayout;
-  auto * title = new QLabel(QStringLiteral("UR5e Data Collection Console"));
-  title->setStyleSheet(QStringLiteral("font-size:22px; font-weight:bold; color:#e4c778;"));
-  connection_label_ = make_value_label(QStringLiteral("connecting to dashboard backend"));
-  header->addWidget(title);
-  header->addStretch();
-  header->addWidget(connection_label_);
+  auto * top_bar = new QHBoxLayout;
+  top_bar->setContentsMargins(4, 0, 4, 0);
+  top_bar->setSpacing(10);
+  auto * brand_block = new QHBoxLayout;
+  brand_block->setContentsMargins(0, 0, 0, 0);
+  brand_block->setSpacing(8);
+  auto * logo = new QLabel(root);
+  logo->setObjectName(QStringLiteral("console_logo"));
+  logo->setFixedSize(150, 46);
+  logo->setAlignment(Qt::AlignCenter);
+  const QPixmap logo_pixmap(QStringLiteral(":/data_collection_rviz_panel/chuangzhou_best_logo.png"));
+  if (!logo_pixmap.isNull()) {
+    logo->setPixmap(logo_pixmap.scaled(150, 46, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+  }
+  auto * title = new QLabel(QStringLiteral("Robotics Data Workbench"), root);
+  title->setStyleSheet(QStringLiteral("font-size:25px; font-weight:bold; color:#e4c778;"));
+  brand_block->addWidget(logo);
+  brand_block->addWidget(title);
+  top_bar->addLayout(brand_block);
+  top_bar->addStretch(1);
+  auto * status_row = new QHBoxLayout;
+  status_row->setContentsMargins(0, 0, 0, 0);
+  status_row->setSpacing(8);
+  dashboard_health_frame_ = new QFrame(root);
+  dashboard_health_frame_->setObjectName(QStringLiteral("dashboard_status_chip"));
+  auto * dashboard_health_layout = new QHBoxLayout(dashboard_health_frame_);
+  dashboard_health_layout->setContentsMargins(7, 3, 7, 3);
+  dashboard_health_layout->setSpacing(0);
+  connection_label_ = make_value_label(QStringLiteral("Waiting"));
+  connection_label_->setAlignment(Qt::AlignCenter);
+  dashboard_health_layout->addWidget(connection_label_);
+  set_dashboard_health_chip(
+    dashboard_health_frame_, connection_label_, false, true, QStringLiteral("Waiting"));
+  status_row->addWidget(dashboard_health_frame_);
   robot_health_value_ = make_health_label();
   scene_camera_health_value_ = make_health_label();
   wrist_camera_health_value_ = make_health_label();
@@ -794,11 +875,12 @@ void MainWindow::build_ui()
   set_health_chip(scene_camera_health_value_, QStringLiteral("Scene"), false, false, QStringLiteral("waiting"));
   set_health_chip(wrist_camera_health_value_, QStringLiteral("Wrist"), false, false, QStringLiteral("waiting"));
   set_health_chip(writer_health_value_, QStringLiteral("Writer"), false, false, QStringLiteral("waiting"));
-  header->addWidget(robot_health_value_);
-  header->addWidget(scene_camera_health_value_);
-  header->addWidget(wrist_camera_health_value_);
-  header->addWidget(writer_health_value_);
-  root_layout->addLayout(header);
+  status_row->addWidget(robot_health_value_);
+  status_row->addWidget(scene_camera_health_value_);
+  status_row->addWidget(wrist_camera_health_value_);
+  status_row->addWidget(writer_health_value_);
+  top_bar->addLayout(status_row);
+  root_layout->addLayout(top_bar);
 
   auto * visual_column = new QWidget(root);
   visual_column->setMinimumWidth(680);
@@ -876,13 +958,15 @@ void MainWindow::build_ui()
   control_services_button_ = new QPushButton(QStringLiteral("Start"), mode_actions_frame);
   stop_control_services_button_ = new QPushButton(QStringLiteral("Stop"), mode_actions_frame);
   idle_button_ = new QPushButton(QStringLiteral("Pause"), mode_actions_frame);
-  auto_button_ = new QPushButton(QStringLiteral("AUTO"), mode_actions_frame);
+  act_button_ = new QPushButton(QStringLiteral("ACT"), mode_actions_frame);
+  vla_button_ = new QPushButton(QStringLiteral("VLA"), mode_actions_frame);
   api_button_ = new QPushButton(QStringLiteral("API"), mode_actions_frame);
   teleop_button_ = new QPushButton(QStringLiteral("TELEOP"), mode_actions_frame);
-  hil_button_ = new QPushButton(QStringLiteral("Hil_teleop"), mode_actions_frame);
+  hil_button_ = new QPushButton(QStringLiteral("HIL TELEOP"), mode_actions_frame);
   const QList<QPair<QPushButton *, QString>> mode_buttons = {
-    {auto_button_, QStringLiteral("auto")}, {api_button_, QStringLiteral("api")},
-    {teleop_button_, QStringLiteral("teleop")}, {hil_button_, QStringLiteral("hil_teleop")}};
+    {act_button_, QStringLiteral("act")}, {vla_button_, QStringLiteral("smolvla")},
+    {api_button_, QStringLiteral("http_control")}, {teleop_button_, QStringLiteral("teleop")},
+    {hil_button_, QStringLiteral("hil_teleop")}};
   connect(control_services_button_, &QPushButton::clicked, this, &MainWindow::start_control_services);
   connect(stop_control_services_button_, &QPushButton::clicked, this, &MainWindow::stop_control_services);
   connect(idle_button_, &QPushButton::clicked, this, [this]() { request_mode(QStringLiteral("idle")); });
@@ -895,7 +979,7 @@ void MainWindow::build_ui()
       [this, mode = mode_buttons[index].second]() { request_mode(mode); });
   }
   idle_button_->setMinimumHeight(36);
-  mode_buttons_layout->addWidget(idle_button_, 3, 0, 1, 2);
+  mode_buttons_layout->addWidget(idle_button_, 3, 1);
   mode_layout->addWidget(mode_actions_frame);
   mode_box->setMinimumHeight(420);
   operation_layout->addWidget(mode_box);
@@ -1002,8 +1086,11 @@ void MainWindow::build_ui()
   replay_stop_button_ = new QPushButton(QStringLiteral("Stop"), replay_box);
   replay_timeline_ = new QSlider(Qt::Horizontal, root);
   replay_timeline_->setRange(0, 0);
+  replay_timeline_->setMinimumHeight(28);
   replay_timeline_->setEnabled(false);
   replay_progress_value_ = make_value_label(QStringLiteral("Frame - / - · t = -"));
+  replay_progress_value_->setWordWrap(false);
+  replay_progress_value_->setMinimumWidth(230);
   replay_status_value_ = make_value_label(QStringLiteral("Select a qpos_gripper dataset"));
   replay_layout->addWidget(new QLabel(QStringLiteral("Dataset Path")), 0, 0);
   replay_layout->addWidget(replay_dataset_path_, 0, 1, 1, 3);
@@ -1301,12 +1388,14 @@ void MainWindow::request_dashboard_state()
     reply->deleteLater();
     dashboard_state_request_in_flight_ = false;
     if (!ok) {
-      connection_label_->setText(QStringLiteral("dashboard backend disconnected"));
+      set_dashboard_health_chip(
+        dashboard_health_frame_, connection_label_, false, false, QStringLiteral("Disconnected"));
       return;
     }
     const QJsonDocument document = QJsonDocument::fromJson(payload);
     if (!document.isObject()) { return; }
-    connection_label_->setText(QStringLiteral("dashboard backend connected"));
+    set_dashboard_health_chip(
+      dashboard_health_frame_, connection_label_, true, false, QStringLiteral("Connected"));
     update_dashboard_state(document.object());
   });
 }
@@ -2763,7 +2852,7 @@ void MainWindow::update_control_services_button()
 
 void MainWindow::set_mode_buttons_enabled(bool enabled)
 {
-  for (QPushButton * button : {idle_button_, auto_button_, api_button_, teleop_button_, hil_button_}) {
+  for (QPushButton * button : {idle_button_, act_button_, vla_button_, api_button_, teleop_button_, hil_button_}) {
     if (button != nullptr) {
       button->setEnabled(enabled);
     }

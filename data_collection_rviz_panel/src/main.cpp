@@ -58,7 +58,7 @@ int main(int argc, char ** argv)
   if (!instance_lock.tryLock(100)) {
     QMessageBox::information(
       nullptr,
-      QStringLiteral("UR5e Data Collection Console"),
+      QStringLiteral("Robotics Data Workbench"),
       QStringLiteral("The data collection console is already running."));
     rclcpp::shutdown();
     return 0;
